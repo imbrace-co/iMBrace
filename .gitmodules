@@ -1,0 +1,48 @@
+[submodule "imbrace-fe"]
+	path = imbrace-fe
+	url = https://github.com/imbraceltd/imbrace-fe.git
+[submodule "imbrace-ui"]
+	path = imbrace-ui
+	url = https://github.com/imbraceltd/imbrace-ui.git
+[submodule "imbrace-chat-widget"]
+	path = imbrace-chat-widget
+	url = https://github.com/imbraceltd/imbrace-chat-widget.git
+[submodule "imbrace-ai-chatbot"]
+	path = imbrace-ai-chatbot
+	url = https://github.com/imbraceltd/imbrace-ai-chatbot.git
+[submodule "chrome-extension"]
+	path = chrome-extension
+	url = https://github.com/imbraceltd/chrome-extension.git
+[submodule "platform"]
+	path = platform
+	url = https://github.com/imbraceltd/platform.git
+[submodule "app-gateway"]
+	path = app-gateway
+	url = https://github.com/imbraceltd/app-gateway.git
+[submodule "ai-agent"]
+	path = ai-agent
+	url = https://github.com/imbraceltd/ai-agent.git
+[submodule "chat-ai"]
+	path = chat-ai
+	url = https://github.com/imbraceltd/chat-ai.git
+[submodule "channel"]
+	path = channel
+	url = https://github.com/imbraceltd/channel.git
+[submodule "data_board"]
+	path = data_board
+	url = https://github.com/imbraceltd/data_board.git
+[submodule "file"]
+	path = file
+	url = https://github.com/imbraceltd/file.git
+[submodule "marketplace"]
+	path = marketplace
+	url = https://github.com/imbraceltd/marketplace.git
+[submodule "auth"]
+	path = auth
+	url = https://github.com/imbraceltd/auth.git
+[submodule "initiationphraseservice"]
+	path = initiationphraseservice
+	url = https://github.com/imbraceltd/initiationphraseservice.git
+[submodule "ap-workflow"]
+	path = ap-workflow
+	url = https://github.com/imbraceltd/ap-workflow.git
