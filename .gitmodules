@@ -43,3 +43,9 @@
 [submodule "ap-workflow"]
 	path = ap-workflow
 	url = https://github.com/imbraceltd/ap-workflow.git
+[submodule "api-sdk"]
+	path = api-sdk
+	url = https://github.com/imbraceltd/api-sdk.git
+[submodule "imbrace-cli"]
+	path = imbrace-cli
+	url = https://github.com/imbraceltd/imbrace-cli.git

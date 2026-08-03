@@ -54,8 +54,13 @@ what this means for contributors.
 |---|---|---|
 | [ap-workflow](https://github.com/imbraceltd/ap-workflow) | Workflow automation engine (ActivePieces-based) | TypeScript · React |
 
-> The IMbrace SDK and CLI are intentionally **not** listed here — they are distributed as
-> packages and tracked separately.
+### SDK & CLI
+Developer tools for building **against** the platform (distributed as packages — `pip` / `npm`):
+
+| Repo | Description | Stack |
+|---|---|---|
+| [api-sdk](https://github.com/imbraceltd/api-sdk) | Official IMbrace SDK — typed client for the platform API, generated from the service specs | Python · TypeScript |
+| [imbrace-cli](https://github.com/imbraceltd/imbrace-cli) | Command-line interface — manage and call the platform from your terminal; built for developers and coding agents | Node · TypeScript |
 
 ---
 
