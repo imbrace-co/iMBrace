@@ -48,7 +48,6 @@ what this means for contributors.
 | [file](https://github.com/imbraceltd/file) | File service — upload, storage, presigned URLs | Node · TypeScript |
 | [marketplace](https://github.com/imbraceltd/marketplace) | App marketplace & templates | Node · TypeScript |
 | [auth](https://github.com/imbraceltd/auth) | Authentication service | — |
-| [initiationphraseservice](https://github.com/imbraceltd/initiationphraseservice) | Initiation-phrase service | — |
 
 ### Workflow
 | Repo | Description | Stack |

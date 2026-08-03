@@ -40,9 +40,6 @@
 [submodule "auth"]
 	path = auth
 	url = https://github.com/imbraceltd/auth.git
-[submodule "initiationphraseservice"]
-	path = initiationphraseservice
-	url = https://github.com/imbraceltd/initiationphraseservice.git
 [submodule "ap-workflow"]
 	path = ap-workflow
 	url = https://github.com/imbraceltd/ap-workflow.git
