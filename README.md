@@ -61,13 +61,21 @@ Developer tools for building **against** the platform (distributed as packages �
 |---|---|---|
 | [api-sdk](https://github.com/imbraceltd/api-sdk) | Official IMbrace SDK — typed client for the platform API, generated from the service specs | Python · TypeScript |
 
+### Deployment
+Everything needed to **run** the platform (as opposed to building it):
+
+| Repo | Description | Stack |
+|---|---|---|
+| [imbrace-deploy-oss](https://github.com/imbraceltd/imbrace-deploy-oss) | OSS deployment artifacts — Helm chart (k3s one-liner install), docker-compose stack, AWS Pulumi program | Helm · docker-compose · Pulumi |
+
 ---
 
 ## Getting started
 
 Each repository is self-contained and has its own README with setup instructions. Clone
 the component you want to work on and follow its local README. A typical on-prem stack is
-composed of the backend services above plus `imbrace-fe`.
+composed of the backend services above plus `imbrace-fe` — or just install the whole
+thing with [imbrace-deploy-oss](https://github.com/imbraceltd/imbrace-deploy-oss).
 
 ## Contributing
 
