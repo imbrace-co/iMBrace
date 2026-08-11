@@ -162,13 +162,6 @@ what this means for contributors.
 |---|---|---|
 | [ap-workflow](https://github.com/imbraceltd/ap-workflow) | Workflow automation engine | TypeScript · React |
 
-### SDK
-Developer tools for building **against** the platform (distributed as packages — `pip` / `npm`):
-
-| Repo | Description | Stack |
-|---|---|---|
-| [api-sdk](https://github.com/imbraceltd/api-sdk) | Official IMbrace SDK — typed client for the platform API, generated from the service specs | Python · TypeScript |
-
 ### Deployment
 Everything needed to **run** the platform (as opposed to building it):
 
