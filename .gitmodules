@@ -40,6 +40,3 @@
 [submodule "ap-workflow"]
 	path = ap-workflow
 	url = https://github.com/imbraceltd/ap-workflow.git
-[submodule "imbrace-deploy-oss"]
-	path = imbrace-deploy-oss
-	url = https://github.com/imbraceltd/imbrace-deploy-oss.git

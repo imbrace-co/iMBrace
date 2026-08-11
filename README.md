@@ -162,21 +162,13 @@ what this means for contributors.
 |---|---|---|
 | [ap-workflow](https://github.com/imbraceltd/ap-workflow) | Workflow automation engine | TypeScript · React |
 
-### Deployment
-Everything needed to **run** the platform (as opposed to building it):
-
-| Repo | Description | Stack |
-|---|---|---|
-| [imbrace-deploy-oss](https://github.com/imbraceltd/imbrace-deploy-oss) | OSS deployment artifacts — Helm chart (k3s one-liner install), docker-compose stack, AWS Pulumi program | Helm · docker-compose · Pulumi |
-
 ---
 
 ## Working on the code
 
 Each repository is self-contained and has its own README with setup instructions. Clone
 the component you want to work on and follow its local README. A typical on-prem stack is
-composed of the backend services above plus `imbrace-fe` — or just install the whole
-thing with [imbrace-deploy-oss](https://github.com/imbraceltd/imbrace-deploy-oss).
+composed of the backend services above plus `imbrace-fe`.
 
 ## Contributing
 
