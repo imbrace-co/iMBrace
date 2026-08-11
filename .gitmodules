@@ -37,6 +37,6 @@
 [submodule "auth"]
 	path = auth
 	url = https://github.com/imbraceltd/auth.git
-[submodule "ap-workflow"]
-	path = ap-workflow
-	url = https://github.com/imbraceltd/ap-workflow.git
+[submodule "workflow"]
+	path = workflow
+	url = https://github.com/imbraceltd/workflow.git

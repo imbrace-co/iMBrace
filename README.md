@@ -160,7 +160,7 @@ what this means for contributors.
 ### Workflow
 | Repo | Description | Stack |
 |---|---|---|
-| [ap-workflow](https://github.com/imbraceltd/ap-workflow) | Workflow automation engine | TypeScript · React |
+| [workflow](https://github.com/imbraceltd/workflow) | Workflow automation engine | TypeScript · React |
 
 ---
 
