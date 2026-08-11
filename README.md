@@ -1,6 +1,6 @@
-# IMbrace — Open Source
+# iMBrace — Open Source
 
-Central hub for the open-source repositories that make up the **IMbrace** platform: an
+Central hub for the open-source repositories that make up the **iMBrace** platform: an
 AI-native workspace with agents, omnichannel conversations, data boards, document
 intelligence, and workflow automation.
 
@@ -10,7 +10,7 @@ repository (linked below).
 
 ---
 
-## Quick start — run IMbrace with one command
+## Quick start — run iMBrace with one command
 
 The fastest way to get a working IMbrace stack is the installer CLI. On a **fresh Linux
 host** (Ubuntu/Debian recommended), run:
