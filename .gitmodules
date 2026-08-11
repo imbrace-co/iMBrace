@@ -10,9 +10,6 @@
 [submodule "imbrace-ai-chatbot"]
 	path = imbrace-ai-chatbot
 	url = https://github.com/imbraceltd/imbrace-ai-chatbot.git
-[submodule "chrome-extension"]
-	path = chrome-extension
-	url = https://github.com/imbraceltd/chrome-extension.git
 [submodule "platform"]
 	path = platform
 	url = https://github.com/imbraceltd/platform.git
