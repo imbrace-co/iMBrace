@@ -1,0 +1,2006 @@
+# =============================================================================
+# IMBRACE OSS — single-file docker-compose deployment
+#
+# Consolidated from imbrace-deploy-oss/docker-compose-imbrace/ (which had one
+# compose file per service) into ONE self-contained file: every sidecar config
+# (nginx, garage.toml, postgres initdb, loki/alloy/prometheus/grafana) is
+# inlined as a compose `config`, so no companion files are needed.
+#
+# Images come from the public docker.io/imbraceltd registry (no pull secret).
+#
+# REQUIREMENTS: Docker Engine 24+ and Docker Compose v2.23.1+
+#               (inline `configs[].content` support).
+#
+# -----------------------------------------------------------------------------
+# QUICK START
+# -----------------------------------------------------------------------------
+#   cd deploy
+#   docker compose up -d                     # everything except GPU + logging
+#   docker compose ps
+#
+# Point the stack at a real host (instead of localhost) either with a .env file
+# next to this one, or inline:
+#   PUBLIC_HOST=10.0.0.5 docker compose up -d
+#
+# Optional add-ons (compose profiles):
+#   docker compose --profile logging up -d           # Loki+Alloy+Prometheus+Grafana
+#   docker compose --profile qwen up -d              # vLLM qwen  (needs NVIDIA GPU)
+#   docker compose --profile gemma4 up -d            # vLLM gemma4
+#   docker compose --profile embedding up -d         # vLLM embedding
+#
+# Stop / wipe:
+#   docker compose down                      # stop
+#   docker compose down -v                   # stop + delete all data volumes
+#
+# -----------------------------------------------------------------------------
+# SUPPORTED .env VARIABLES (all have safe defaults baked in below)
+# -----------------------------------------------------------------------------
+#   PUBLIC_HOST=localhost         # browser-facing IP/DNS, no scheme, no port
+#   PUBLIC_SCHEME=http            # http | https
+#   WS_SCHEME=ws                  # ws when http, wss when https
+#   POSTGRES_PASSWORD=changeme-postgres-pass
+#   REDIS_PASSWORD=imbrace-dev-redis-pass
+#   GARAGE_KEY_ID=                # filled after the garage bootstrap below
+#   GARAGE_KEY_SECRET=
+#   OPENAI_API_KEY=
+#   TAVILY_API_KEY=
+#
+# -----------------------------------------------------------------------------
+# PUBLISHED PORTS
+# -----------------------------------------------------------------------------
+#   6868   Dashboard + /api (edge-proxy)   login admin@imbrace.co / ChangeMe@12345
+#   30700  apworkflow (Activepieces)
+#   30040  ai-agent (Next Best Action)
+#   30030  insightIQ AI chat
+#   30050  chat widget
+#   36868  Grafana (admin/admin, --profile logging)
+#
+# -----------------------------------------------------------------------------
+# ONE-TIME GARAGE (S3) BOOTSTRAP — optional
+# -----------------------------------------------------------------------------
+# Services default to local storage, so this can be done later. Run once after
+# `up -d` (equivalent of the chart's garage-bootstrap-job):
+#
+#   G="docker exec imbrace-svc-garage /garage"
+#   NODE_ID=$($G status | awk '/^[0-9a-f]{16}/ {print $1; exit}')
+#   $G layout assign -z dc1 -c 5G "$NODE_ID"
+#   $G layout apply --version 1
+#   $G bucket create imbrace
+#   $G key create imbrace-app          # prints Key ID + Secret key -> .env
+#   $G bucket allow imbrace --read --write --owner --key imbrace-app
+#
+# Then put the printed key id/secret into .env as GARAGE_KEY_ID /
+# GARAGE_KEY_SECRET and `docker compose up -d` again.
+#
+# -----------------------------------------------------------------------------
+# BEFORE PRODUCTION
+# -----------------------------------------------------------------------------
+# - Rotate: POSTGRES_PASSWORD, REDIS_PASSWORD, NEW_ORG_PASSWORD
+#   (platform-service), the AP_* JWT/encryption keys, channel-service
+#   JWT_SECRET, garage rpc_secret (config `garage-config` below), the Grafana
+#   admin password. Changing POSTGRES_PASSWORD after the first run also needs
+#   an `ALTER ROLE` inside Postgres — initdb only runs once.
+# - `docling-serve:latest` and `vllm-openai:latest*` are not digest-pinned.
+# - SMTP (mailgun) ships with an empty password; fill SMTP_PASSWORD /
+#   SERVICE_MAIL_API_KEY if email egress is needed.
+# - Internal hostnames keep the Helm chart convention (imbrace-svc-*, plus an
+#   imbrace-svc-*.imbrace-services alias) so env values stay ~1:1 with
+#   values.yaml. Differences: ai-agent is addressed on :3000 (the k8s Service
+#   remapped 80->3000) and the apworkflow proxy on :8080.
+# - MongoDB is disabled in the chart (mongodb.enabled=false) and not converted.
+#   The imbrace-svc-ips / onserver.*.imbrace.lan endpoints are kept verbatim
+#   from the chart (no matching service here).
+# =============================================================================
+name: imbrace
+
+# --- shared fragments --------------------------------------------------------
+
+# Base for every one-shot DB init job (Helm post-install hook parity).
+x-db-init: &db-init
+  image: postgres:18-alpine
+  restart: "no"
+  depends_on:
+    postgresql:
+      condition: service_healthy
+  networks: [imbrace-net]
+
+x-ap-secrets: &ap-secrets
+  AP_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+  AP_REDIS_PASSWORD: ${REDIS_PASSWORD:-imbrace-dev-redis-pass}
+  AP_ENCRYPTION_KEY: "57a47fed4ce32358e3c52aadcee58c76"
+  AP_JWT_SECRET: "b9343cbad8c546f2faba846463ce4f46cac6c9f8c17646096ceb6eaff39b1129"
+  AP_WORKER_TOKEN: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjEifQ.eyJpZCI6IjdUVnZfVDJBMlFvQ0VsdC1OdEE2ViIsInR5cGUiOiJXT1JLRVIiLCJpYXQiOjE3NzkxMzYwNjUsImV4cCI6NDkzMjczNjA2NSwiaXNzIjoiYWN0aXZlcGllY2VzIn0.X1nFds7lB3b2FCucGKa3B-OuOdeuc1IAV6HvLEBQJ0I"
+
+x-ai-agent-env: &ai-agent-env
+  NODE_ENV: "production"
+  PORT: "3000"
+  VLLM_URL: "http://imbrace-svc-ai-vllm-qwen:6976/v1"
+  VLLM_BASE_URL: "http://imbrace-svc-ai-vllm-qwen:6976/v1"
+  LLM_PROVIDER: "vllm"
+  AI_PROVIDER: "vllm"
+  BUILTIN_AGENT_PROVIDER_ID: "vllm"
+  BUILTIN_AGENT_MODEL_ID: "auto"
+  VLLM_MODEL_ID: "qwen3.5-35b-a3b"
+  SUGGESTION_MODEL_ID: "qwen3.5-35b-a3b"
+  SUGGESTION_MODEL_PROVIDER_TYPE: "vllm"
+  SUGGESTION_MODEL_PROVIDER_URL: "http://imbrace-svc-ai-vllm-qwen:6976/v1"
+  MONGODB_URI: ""
+  MONGODB_OPENAI_URI: ""
+  MONGODB_DB_NAME: ""
+  AWS_ACCESS_KEY_ID: ${GARAGE_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${GARAGE_KEY_SECRET:-}
+  AWS_REGION_AI: "us-west-2"
+  AWS_S3_BUCKET: "imbrace"
+  AWS_REGION_S3: "garage"
+  AWS_ENDPOINT_URL_S3: "http://imbrace-svc-garage:3900"
+  AWS_ENDPOINT_URL: "http://imbrace-svc-garage:3900"
+  S3_ENDPOINT: "http://imbrace-svc-garage:3900"
+  S3_FORCE_PATH_STYLE: "true"
+  AWS_S3_FORCE_PATH_STYLE: "true"
+  DUCKDB_THREADS: "4"
+  REDIS_ENABLED: "true"
+  REDIS_URL: "redis://:${REDIS_PASSWORD:-imbrace-dev-redis-pass}@imbrace-svc-redis-client:6379"
+  CONTEXT_COMPACT_THRESHOLD: "2000"
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_PROXY_URL: "https://ai-proxy.demo.imbrace.co/v1"
+  EMBEDDING_MODEL: "text-embedding-3-small"
+  EMBEDDING_BASE_URL: ""
+  EMBEDDING_TYPE: "openai"
+  WEB_APP_URL: "http://imbrace-svc-app-gateway:9001"
+  WEB_APP_API_URL: "http://imbrace-svc-app-gateway:9001"
+  APPGATEWAY: "api/v1"
+  CORS_ORIGINS: ""
+  PRODUCTION_CORS_ORIGINS: ""
+  AI_CHAT_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30030"
+  MODEL_ID: "qwen.qwen3-32b-v1:0"
+  APP_GATEWAY_URL: "http://imbrace-svc-app-gateway:9001"
+  AISDK_CHAT_CLIENT_POSTGRES_URL: "postgresql://imbrace:${POSTGRES_PASSWORD:-changeme-postgres-pass}@imbrace-svc-postgresql:5432/postgres"
+  WORKFLOW_URL: "http://imbrace-svc-apworkflow-api:3000"
+  IPS_URL: "http://imbrace-svc-ips:6666"
+  AI_SERVICE_V2_INTERNAL_URL: "http://imbrace-svc-chat-ai:8080"
+  DOCIQ_INGEST_ENABLED: "true"
+  AI_SERVICE_V2_API_KEY: "oss-dociq-key"
+  KAFKA_BROKERS: "imbrace-svc-kafka:9092"
+  KAFKA_CLIENT_ID: "messagesuggestion"
+  KAFKA_GROUP_ID: "messagesuggestion-dociq-dev"
+  KAFKA_USE_SSL: "false"
+  KAFKA_USE_SASL: "false"
+  KAFKA_SASL_MECHANISM: "plain"
+  KAFKA_SASL_USERNAME: ""
+  KAFKA_SASL_PASSWORD: ""
+  KAFKA_USE_SSL_REJECT_UNAUTHORIZED: "false"
+  STORAGE_TYPE: "local"
+  FILE_PATH: "/mnt/data/files/aiToolLoopAgent/"
+  ACTIVEPIECE_URL: "http://imbrace-svc-apworkflow-api:3000"
+  DATA_BOARD_URL: "http://imbrace-svc-data-board:8866"
+
+# Optional GPU model servers (profiles qwen / gemma4 / embedding).
+x-vllm: &vllm
+  restart: unless-stopped
+  ipc: host
+  environment:
+    HF_HOME: /opt/imbrace/hf_home
+  volumes:
+    - /opt/imbrace/hf_home:/opt/imbrace/hf_home
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+
+  # ===========================================================================
+  # INFRASTRUCTURE
+  # ===========================================================================
+
+  # PostgreSQL 18 + pgvector (from the `postgresql` subchart). The inlined
+  # initdb script mirrors templates/postgresql-initdb-cm.yaml and runs ONCE on
+  # first start (empty volume) — remove the pgdata volume to re-init.
+  postgresql:
+    image: pgvector/pgvector:pg18
+    container_name: imbrace-svc-postgresql
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+      POSTGRES_DB: imbrace
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      # Activepieces issues CREATE COLLATION ... PROVIDER='icu' at boot — the
+      # cluster must be initdb'd with the ICU locale provider (chart parity).
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --encoding=UTF8 --locale-provider=icu --icu-locale=en-US"
+      # Consumed by the initdb script (imbrace app role).
+      IMBRACE_DB_USER: imbrace
+      IMBRACE_DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    configs:
+      - source: postgres-initdb
+        target: /docker-entrypoint-initdb.d/00-init.sh
+    # Uncomment to reach Postgres from the host (debugging only):
+    # ports:
+    #   - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-postgresql
+          - imbrace-svc-postgresql.imbrace-services
+
+  # Redis (from the `redis` subchart, standalone, auth enabled). The chart's
+  # client Service is imbrace-svc-redis-client — kept as an alias because every
+  # consumer's REDIS_HOST points at it.
+  redis:
+    image: docker.io/library/redis:8.6.2
+    container_name: imbrace-svc-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-imbrace-dev-redis-pass}", "--appendonly", "yes"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-imbrace-dev-redis-pass}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD:-imbrace-dev-redis-pass}\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-redis
+          - imbrace-svc-redis-client
+          - imbrace-svc-redis-client.imbrace-services
+
+  # Kafka (from the `kafka` subchart). The chart runs a 3-node combined-mode
+  # cluster; here it is a single combined broker+controller (dev sizing).
+  # Clients connect PLAINTEXT, no SASL/SSL. Topics auto-create.
+  kafka:
+    image: docker.io/apache/kafka:4.2.0
+    container_name: imbrace-svc-kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@imbrace-svc-kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://imbrace-svc-kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Chart config parity (kafka.config.*)
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      # Single node → replication factor 1 for internal topics
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: "-Xms1g -Xmx1g"
+      KAFKA_JVM_PERFORMANCE_OPTS: "-server -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:InitiatingHeapOccupancyPercent=35 -XX:+ExplicitGCInvokesConcurrent -XX:MaxInlineLevel=15 -Djava.awt.headless=true"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-kafka
+          - imbrace-svc-kafka.imbrace-services
+
+  # Garage — S3-compatible object store (from the `garage` subchart, single
+  # node, replication_factor=1, lmdb). S3 API :3900, S3 web :3902, in-network
+  # only. See the GARAGE BOOTSTRAP block in the header for the one-time setup.
+  garage:
+    image: docker.io/dxflrs/garage:v2.2.0
+    container_name: imbrace-svc-garage
+    restart: unless-stopped
+    volumes:
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    configs:
+      - source: garage-config
+        target: /etc/garage.toml
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-garage
+          - imbrace-svc-garage.imbrace-services
+
+  # ===========================================================================
+  # PLATFORM SERVICE — org/user/auth. Seeds the first org + admin from
+  # NEW_ORG_USERNAME / NEW_ORG_PASSWORD. In-network only (:6040).
+  # ===========================================================================
+
+  platform-db-init:
+    <<: *db-init
+    environment:
+      PGHOST: imbrace-svc-postgresql
+      PGPORT: "5432"
+      PGDATABASE: platform
+      PGSUPERUSER: postgres
+      PGSUPERPASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "[init] waiting for Postgres at $$PGHOST:$$PGPORT..."
+        until pg_isready -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" >/dev/null 2>&1; do sleep 3; done
+        echo "[init] ensuring database '$$PGDATABASE' (idempotent)..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+        SELECT 'CREATE DATABASE $$PGDATABASE OWNER $$PGSUPERUSER'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$$PGDATABASE')\gexec
+        SQL
+        echo "[init] done"
+
+  platform-service:
+    image: docker.io/imbraceltd/imbrace-platform:v0.0.3-3453eb3
+    container_name: imbrace-svc-platform-service
+    restart: unless-stopped
+    depends_on:
+      platform-db-init:
+        condition: service_completed_successfully
+    environment:
+      PORT: "6040"
+      NODE_ENV: "production"
+      DB_TYPE: "postgres"
+      NEW_ORG_NAME: ""
+      NEW_ORG_USERNAME: "admin@imbrace.co"
+      NEW_ORG_PASSWORD: "ChangeMe@12345"
+      IMBRACE_USERNAME: ""
+      IMBRACE_PASSWORD: ""
+      SUPERADMIN_EMAILS: ""
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-changeme-postgres-pass}@imbrace-svc-postgresql:5432/platform"
+      DESTINATION_POSTGRES_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-changeme-postgres-pass}@imbrace-svc-postgresql:5432/platform"
+      SERVICE_CHANNEL: "http://imbrace-svc-channel-service:4000"
+      SERVICE_AI: "http://imbrace-svc-chat-ai:8080"
+      SERVICE_DATA_BOARD: "http://imbrace-svc-data-board:8866"
+      SERVICE_MARKET_PLACE: "http://imbrace-svc-marketplace:4000"
+      ORG_DEFAULT_IS_PAID: "true"
+      APP_API_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/api/platform"
+      APP_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868"
+      AWS_REGION: "ap-east-1"
+      AWS_S3_BUCKET: "imbrace-uat"
+      AWS_S3_BUCKET_PREFIX: "prod"
+      SMTP_ADDRESS: "smtp.mailgun.org"
+      SMTP_PORT: "587"
+      SMTP_USERNAME: "postmaster@imbrace.co"
+      SMTP_SENDER: "noreply@imbrace.co"
+      SMTP_PASSWORD: ""
+      EMAIL_EGRESS: "mail-service"
+      SERVICE_MAIL: "https://imbrace-api.imbrace.co"
+      SERVICE_MAIL_API_KEY: ""
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-platform-service
+          - imbrace-svc-platform-service.imbrace-services
+
+  # ===========================================================================
+  # FILE SERVICE — REST upload/download. STORAGE MODE = LOCAL: uploads persist
+  # in the file-data volume at /data (chart: file-service-data PVC).
+  # In-network only (:8866).
+  # ===========================================================================
+
+  file-db-init:
+    <<: *db-init
+    environment:
+      PGHOST: imbrace-svc-postgresql
+      PGPORT: "5432"
+      PGDATABASE: fileservice
+      PGSUPERUSER: postgres
+      PGSUPERPASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "[init] waiting for Postgres at $$PGHOST:$$PGPORT..."
+        until pg_isready -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" >/dev/null 2>&1; do sleep 3; done
+        echo "[init] ensuring database '$$PGDATABASE' (idempotent)..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+        SELECT 'CREATE DATABASE $$PGDATABASE OWNER $$PGSUPERUSER'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$$PGDATABASE')\gexec
+        SQL
+        echo "[init] done"
+
+  file-service:
+    image: docker.io/imbraceltd/file:v0.0.4-6c2ede1
+    container_name: imbrace-svc-file-service
+    restart: unless-stopped
+    depends_on:
+      file-db-init:
+        condition: service_completed_successfully
+    environment:
+      SERVICE_NAME: "file-service"
+      DB_TYPE: "postgres"
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-changeme-postgres-pass}@imbrace-svc-postgresql:5432/fileservice"
+      NODE_ENV: "dev"
+      PORT: "8866"
+      MONGO_URI: ""
+      # LOCAL_PATH set => local storage adapter; S3 keys below stay inert
+      LOCAL_PATH: "/data/"
+      FILE_PATH: "/data"
+      FILE_PUBLIC_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/v1/files"
+      SERVICE_BASE_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868"
+      S3_BUCKET_NAME: ""
+      S3_URL: ""
+      S3_ENDPOINT: ""
+      S3_FORCE_PATH_STYLE: "false"
+      AWS_REGION: ""
+      AWS_ACCESS_KEY_ID: ""
+      AWS_SECRET_ACCESS_KEY: ""
+      AWS_ENDPOINT_URL_S3: ""
+      AWS_ENDPOINT_URL: ""
+      AWS_S3_FORCE_PATH_STYLE: "false"
+    volumes:
+      - file-data:/data
+      - file-logs:/app/logs
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-file-service
+          - imbrace-svc-file-service.imbrace-services
+
+  # ===========================================================================
+  # CHANNEL SERVICE — FB/IG/WhatsApp connectors. The app runs its own drizzle
+  # migrations at boot. In-network only (:4000).
+  # ===========================================================================
+
+  channel-db-init:
+    <<: *db-init
+    environment:
+      PGHOST: imbrace-svc-postgresql
+      PGPORT: "5432"
+      PGDATABASE: channel_service
+      PGSUPERUSER: postgres
+      PGSUPERPASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "[init] waiting for Postgres at $$PGHOST:$$PGPORT..."
+        until pg_isready -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" >/dev/null 2>&1; do sleep 3; done
+        echo "[init] ensuring database '$$PGDATABASE' (idempotent)..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+        SELECT 'CREATE DATABASE $$PGDATABASE OWNER $$PGSUPERUSER'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$$PGDATABASE')\gexec
+        SQL
+        echo "[init] done"
+
+  channel-service:
+    image: docker.io/imbraceltd/channel:v0.0.25-d32bd89
+    container_name: imbrace-svc-channel-service
+    restart: unless-stopped
+    depends_on:
+      channel-db-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      PORT: "4000"
+      NODE_ENV: "production"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      DB_TYPE: "postgres"
+      DB_HOST: "imbrace-svc-postgresql"
+      DB_PORT: "5432"
+      DB_USER: "postgres"
+      DB_NAME: "channel_service"
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-changeme-postgres-pass}@imbrace-svc-postgresql:5432/channel_service"
+      MONGO_URI: ""
+      MONGO_DB_NAME: ""
+      REDIS_HOST: "imbrace-svc-redis-client"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-imbrace-dev-redis-pass}
+      REDIS_ENABLE_ADAPTER: "true"
+      KAFKA_BROKERS: "imbrace-svc-kafka:9092"
+      KAFKA_CLIENT_ID: "channel-service"
+      KAFKA_GROUP_ID: "channel-service-group"
+      KAFKA_USE_SSL: "false"
+      KAFKA_USE_SASL: "false"
+      KAFKA_SASL_MECHANISM: "plain"
+      KAFKA_SASL_USERNAME: ""
+      KAFKA_SASL_PASSWORD: ""
+      KAFKA_USE_SSL_REJECT_UNAUTHORIZED: "false"
+      RATE_LIMIT_POINTS: "5"
+      RATE_LIMIT_DURATION: "1"
+      RATE_LIMIT_BLOCK_DURATION: "60"
+      DATA_BOARD_HOST: "http://imbrace-svc-data-board:8866"
+      PLATFORM_SERVICE_HOST: "http://imbrace-svc-platform-service:6040"
+      PLATFORM_HOST: "http://imbrace-svc-platform-service:6040"
+      SERVICE_AI_V2: "http://imbrace-svc-chat-ai:8080"
+      # ai-agent container listens on 3000 (the k8s Service remapped 80->3000)
+      MESSAGE_SUGGESTION_URL: "http://imbrace-svc-ai-agent:3000"
+      FILE_SERVICE_HOST: "http://imbrace-svc-file-service:8866"
+      AP_WORKFLOW_HOST: "http://imbrace-svc-apworkflow-api:3000"
+      AWS_REGION: "ap-east-1"
+      AWS_S3_BUCKET: "imbrace-uat"
+      FACEBOOK_VERIFY_TOKEN: "imbrace2026"
+      INSTAGRAM_VERIFY_TOKEN: "imbrace2026"
+      FACEBOOK_WHATSAPP_VERIFY_TOKEN: "imbrace2026"
+      FACEBOOK_APP_ID: ""
+      FACEBOOK_APP_SECRET: ""
+      FACEBOOK_APP_TOKEN: ""
+      INSTAGRAM_APP_ID: ""
+      INSTAGRAM_APP_SECRET: ""
+      INSTAGRAM_APP_ID_V2: ""
+      INSTAGRAM_APP_SECRET_V2: ""
+      INSTAGRAM_OAUTH_REDIRECT_URI: ""
+      INTERNAL_HEADER_NAME: "X-Internal-Request"
+      INTERNAL_HEADER_VALUE: "true"
+      JWT_SECRET: "5e33a6cff2a66e8bc8f356b5105ef595b47db4a9397777c78754707d6bb6afe1"
+      SERVICE_NAME: "channel-service"
+      INBOUND_INGEST_ENABLED: "true"
+      WORKFLOW_CONSUMER_ENABLED: "true"
+      EMAIL_PROVIDER: "smtp"
+      EMAIL_FROM: "noreply@imbrace.co"
+      EMAIL_FROM_NAME: "iMBrace"
+      SMTP_ADDRESS: "smtp.mailgun.org"
+      SMTP_HOST: "smtp.mailgun.org"
+      SMTP_PORT: "587"
+      SMTP_SENDER: "noreply@imbrace.co"
+      SMTP_USERNAME: "postmaster@imbrace.co"
+      SMTP_PASSWORD: ""
+      EMAIL_EGRESS: "mail-service"
+      SERVICE_MAIL: "https://imbrace-api.imbrace.co"
+      SERVICE_MAIL_API_KEY: ""
+      DOCIQ_FALLBACK_USER_ID: ""
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-channel-service
+          - imbrace-svc-channel-service.imbrace-services
+
+  # ===========================================================================
+  # DATA BOARD — db-init creates the `databoard` DB owned by the `imbrace` role
+  # plus the drizzle schema (templates/databoard-db-init-job.yaml); table DDL is
+  # owned by the app's drizzle migrations. In-network only (:8866).
+  # ===========================================================================
+
+  databoard-db-init:
+    <<: *db-init
+    environment:
+      PGHOST: imbrace-svc-postgresql
+      PGPORT: "5432"
+      PGDATABASE: databoard
+      PGSUPERUSER: postgres
+      PGSUPERPASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+      PGAPPUSER: imbrace
+      PGAPPPASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "[init] waiting for Postgres at $$PGHOST:$$PGPORT..."
+        until pg_isready -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" >/dev/null 2>&1; do sleep 3; done
+        echo "[init] ensuring role '$$PGAPPUSER' (idempotent)..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d postgres -v ON_ERROR_STOP=1 \
+          -v appuser="$$PGAPPUSER" -v apppass="$$PGAPPPASSWORD" <<'SQL'
+        SELECT format('CREATE ROLE %I LOGIN PASSWORD %L CREATEDB', :'appuser', :'apppass')
+        WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'appuser')\gexec
+        SQL
+        echo "[init] ensuring database '$$PGDATABASE' owned by '$$PGAPPUSER' (idempotent)..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d postgres -v ON_ERROR_STOP=1 \
+          -v dbname="$$PGDATABASE" -v appuser="$$PGAPPUSER" <<'SQL'
+        SELECT format('CREATE DATABASE %I OWNER %I', :'dbname', :'appuser')
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'dbname')\gexec
+        SQL
+        echo "[init] ensuring drizzle schema..."
+        PGPASSWORD="$$PGAPPPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGAPPUSER" -d "$$PGDATABASE" \
+          -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS "drizzle";'
+        echo "[init] done"
+
+  data-board:
+    image: docker.io/imbraceltd/data_board:v0.0.5-67b903e
+    container_name: imbrace-svc-data-board
+    restart: unless-stopped
+    depends_on:
+      databoard-db-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      NODE_ENV: "production"
+      MONGO_URI: ""
+      DB_TYPE: "postgres"
+      POSTGRES_URL: "postgresql://imbrace:${POSTGRES_PASSWORD:-changeme-postgres-pass}@imbrace-svc-postgresql:5432/databoard"
+      AI_SERVICE_URL: "http://imbrace-svc-chat-ai:8080/api/v1"
+      # ai-agent container listens on 3000 (the k8s Service remapped 80->3000)
+      MESSAGE_SUGGESTION_URL: "http://imbrace-svc-ai-agent:3000"
+      AI_PROXY_URL: "http://imbrace-svc-chat-ai:8080"
+      FS_SERVICE_URL: "http://imbrace-svc-file-service:8866/api/files"
+      APP_GATEWAY_HOST: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/api"
+      PLATFORM_SERVICE_HOST: "http://imbrace-svc-platform-service:6040"
+      WEBAPP_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/"
+      AI_MONGO_URL: ""
+      AI_MONGO_DB_NAME: ""
+      AI_ASSISTANTS_COLLECTION: "openai_assistants"
+      REDIS_HOST: "imbrace-svc-redis-client"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-imbrace-dev-redis-pass}
+      SMTP_ADDRESS: "smtp.mailgun.org"
+      SMTP_PORT: "587"
+      SMTP_USERNAME: "postmaster@imbrace.co"
+      SMTP_SENDER: "noreply@imbrace.co"
+      SMTP_PASSWORD: ""
+      ONEDRIVE_CLIENT_ID: ""
+      ONEDRIVE_CLIENT_SECRET: ""
+      ONEDRIVE_TENANT_ID: ""
+      ONEDRIVE_REDIRECT_URI: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/api/data-board/auth/onedrive/callback"
+      GOOGLE_DRIVE_CLIENT_ID: ""
+      GOOGLE_DRIVE_CLIENT_SECRET: ""
+      GOOGLE_DRIVE_REDIRECT_URI: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/api/data-board/auth/google-drive/callback"
+      DROPBOX_APP_KEY: ""
+      DROPBOX_APP_SECRET: ""
+      DROPBOX_REDIRECT_URI: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/api/data-board/auth/dropbox/callback"
+      AWS_REGION: "garage"
+      AWS_ACCESS_KEY_ID: ${GARAGE_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${GARAGE_KEY_SECRET:-}
+      AWS_S3_BUCKET: "imbrace"
+      AWS_ENDPOINT_URL_S3: "http://imbrace-svc-garage:3900"
+      AWS_ENDPOINT_URL: "http://imbrace-svc-garage:3900"
+      S3_ENDPOINT: "http://imbrace-svc-garage:3900"
+      S3_FORCE_PATH_STYLE: "true"
+      AWS_S3_FORCE_PATH_STYLE: "true"
+      KAFKA_BROKERS: "imbrace-svc-kafka:9092"
+      KAFKA_ENABLED: "true"
+      KAFKA_CLIENT_ID: "data-board-service"
+      KAFKA_USE_SSL: "false"
+      KAFKA_USE_SASL: "false"
+      KAFKA_SASL_MECHANISM: "plain"
+      KAFKA_SASL_USERNAME: ""
+      KAFKA_SASL_PASSWORD: ""
+      KAFKA_USE_SSL_REJECT_UNAUTHORIZED: "false"
+      CHANNEL_SERVICE_URL: "http://imbrace-svc-channel-service:4000"
+      MARKETPLACE_URL: "http://imbrace-svc-marketplace:4000"
+    volumes:
+      # winston-daily-rotate-file mkdirSync('logs/') needs a writable /app/logs
+      - databoard-logs:/app/logs
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-data-board
+          - imbrace-svc-data-board.imbrace-services
+
+  # ===========================================================================
+  # MARKETPLACE — db-init creates the `marketplaces` DB + drizzle schema
+  # (templates/marketplace-db-init-job.yaml). In-network only (:4000).
+  # ===========================================================================
+
+  marketplace-db-init:
+    <<: *db-init
+    environment:
+      PGHOST: imbrace-svc-postgresql
+      PGPORT: "5432"
+      PGDATABASE: marketplaces
+      PGSUPERUSER: postgres
+      PGSUPERPASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "[init] waiting for Postgres at $$PGHOST:$$PGPORT..."
+        until pg_isready -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" >/dev/null 2>&1; do sleep 3; done
+        echo "[init] ensuring database '$$PGDATABASE' (idempotent)..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+        SELECT 'CREATE DATABASE $$PGDATABASE OWNER $$PGSUPERUSER'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$$PGDATABASE')\gexec
+        SQL
+        echo "[init] ensuring drizzle schema..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d "$$PGDATABASE" \
+          -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS "drizzle";'
+        echo "[init] done"
+
+  marketplace:
+    image: docker.io/imbraceltd/marketplace:v0.0.9-f0966c8
+    container_name: imbrace-svc-marketplace
+    restart: unless-stopped
+    depends_on:
+      marketplace-db-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      ENV: "production"
+      VERSION: "1.0.0"
+      SERVER_PORT: "4000"
+      DB_TYPE: "postgres"
+      POSTGRES_HOST: "imbrace-svc-postgresql"
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+      POSTGRES_DB: "marketplaces"
+      POSTGRES_NAME: "marketplaces"
+      DOMAIN: "${PUBLIC_HOST:-localhost}"
+      POSTGRES_SSL: "false"
+      REDIS_HOST: "imbrace-svc-redis-client"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-imbrace-dev-redis-pass}
+      WORKFLOW_HOST: "http://imbrace-svc-apworkflow-api:3000"
+      AP_WORKFLOW_HOST: "http://imbrace-svc-apworkflow-api:3000"
+      KNOWLEDGE_HUB: "http://imbrace-svc-data-board:8866"
+      BACKEND_HOST: "http://imbrace-svc-platform-service:6040"
+      LOG_LEVEL: "debug"
+      FILE_PATH: "/tmp/"
+      SEED_TEAM_DEFAULT_TEMPLATES: "true"
+      KAFKA_CLIENT_ID: "marketplace"
+      KAFKA_GROUP: "marketplace"
+      KAFKA_ENDPOINT: "imbrace-svc-kafka:9092"
+      KAFKA_USE_SSL: "false"
+      KAFKA_USE_SASL: "false"
+      KAFKA_SASL_MECHANISM: "plain"
+      KAFKA_SASL_USERNAME: ""
+      KAFKA_SASL_PASSWORD: ""
+      FACEBOOK_VERIFY_TOKEN: ""
+      AI_SERVICE: "http://imbrace-svc-chat-ai:8080"
+      AI_SERVICE_V2: "http://imbrace-svc-chat-ai:8080"
+      PLATFORM_HOST: "http://imbrace-svc-platform-service:6040"
+      CHANNEL_SERVICE_URL: "http://imbrace-svc-channel-service:4000"
+      CRMBOARD_USE_DATABOARD: "true"
+      AWS_S3_REGION: "ap-east-1"
+      AWS_S3_BUCKET: ""
+      AWS_S3_ACCESS_KEY_ID: ""
+      AWS_S3_SECRET_ACCESS_KEY: ""
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-marketplace
+          - imbrace-svc-marketplace.imbrace-services
+
+  # ===========================================================================
+  # CHAT-AI — AI LLM gateway (open-webui fork). db-init creates the `chatai` DB
+  # + pgvector extension (templates/chat-ai-db-init-job.yaml); the app owns its
+  # schema via alembic migrations at startup. In-network only (:8080).
+  # ===========================================================================
+
+  chatai-db-init:
+    <<: *db-init
+    environment:
+      PGHOST: imbrace-svc-postgresql
+      PGPORT: "5432"
+      PGDATABASE: chatai
+      PGSUPERUSER: postgres
+      PGSUPERPASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "[init] waiting for Postgres at $$PGHOST:$$PGPORT..."
+        until pg_isready -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" >/dev/null 2>&1; do sleep 3; done
+        echo "[init] ensuring database '$$PGDATABASE' (idempotent)..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+        SELECT 'CREATE DATABASE $$PGDATABASE OWNER $$PGSUPERUSER'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$$PGDATABASE')\gexec
+        SQL
+        echo "[init] ensuring pgvector extension..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d "$$PGDATABASE" \
+          -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+        echo "[init] done"
+
+  chat-ai:
+    image: docker.io/imbraceltd/chat-ai:v0.0.2-f31753f
+    container_name: imbrace-svc-chat-ai
+    restart: unless-stopped
+    depends_on:
+      chatai-db-init:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+    environment:
+      ENV: "prod"
+      CHAT_AI_URL: ""
+      IMBRACE_NEXT_BEST_ACTION_URL: ""
+      IMBRACE_PLATFORM_HOST: "http://imbrace-svc-platform-service:6040"
+      OLLAMA_BASE_URL: "http://localhost:11434"
+      OPENAI_API_BASE_URL: ""
+      ENCRYPTION_SECRET_KEY: "imbrace2026"
+      WEBUI_SECRET_KEY: "Ga9fImSJMCx5d9qLkRNwCQJ9I//573YWZ0zcl34n8pU="
+      ANONYMIZED_TELEMETRY: "false"
+      DO_NOT_TRACK: "true"
+      SCARF_NO_ANALYTICS: "true"
+      CORS_ALLOW_ORIGIN: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868"
+      IMBRACE_API_URL: "http://imbrace-svc-app-gateway:9001"
+      IMBRACE_WEBAPP_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868"
+      # NB: key misspelled BACKNED upstream — the app reads it verbatim
+      IMBRACE_BACKNED_PRIVATE: "http://imbrace-svc-platform-service:6040"
+      BACKEND_HOST: "http://imbrace-svc-platform-service:6040"
+      DATABOARD_HOST: "http://imbrace-svc-data-board:8866"
+      WORKFLOW_HOST: "http://imbrace-svc-apworkflow-api:3000"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_PROVIDER: "vllm"
+      LLM_DEFAULT_MODEL: "qwen3.5-35b-a3b"
+      BEDROCK_ACCESS_KEY_ID: ""
+      BEDROCK_SECRET_ACCESS_KEY: ""
+      BEDROCK_REGION: "us-west-2"
+      OLLAMA_HOST: ""
+      KIMI_URL: "http://onserver.dell.imbrace.lan:6969/v1"
+      KIMI_MODEL: "/opt/imbrace/hf_home/models/Kimi-VL-A3B-Thinking-2506"
+      LLM_DEFAULT_PROVIDER: "vllm"
+      LLM_RETRIEVER_PROVIDER: "vllm"
+      LLM_EMBEDDING_PROVIDER: "vllm"
+      VLLM_URL: "http://imbrace-svc-ai-vllm-qwen:6976/v1"
+      VLLM_MODEL: "qwen3.5-35b-a3b"
+      VLLM_RETRIEVER_MODEL: "qwen3.5-35b-a3b"
+      VLLM_API_KEY: ""
+      VLLM_EMBEDDING_URL: "http://imbrace-svc-ai-vllm-qwen:6976/v1"
+      VLLM_EMBEDDING_MODEL: "qwen3.5-35b-a3b"
+      RAG_EMBEDDING_WRITE_COLUMN: "embedding_v2"
+      RAG_EMBEDDING_READ_COLUMN: "embedding_v2"
+      STORAGE_PROVIDER: "local"
+      S3_REGION_NAME: "garage"
+      S3_ACCESS_KEY_ID: ${GARAGE_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${GARAGE_KEY_SECRET:-}
+      S3_BUCKET_NAME: "imbrace"
+      S3_KEY_PREFIX: "ai-chat"
+      S3_ENDPOINT_URL: "http://imbrace-svc-garage:3900"
+      AWS_ACCESS_KEY_ID: ${GARAGE_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${GARAGE_KEY_SECRET:-}
+      MONGODB_OPENAI_HOST: ""
+      MONGODB_OPENAI_DB_NAME: ""
+      ENABLE_INIT_VECTOR_INDEX: "true"
+      DB_TYPE: "postgresql"
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-changeme-postgres-pass}@imbrace-svc-postgresql:5432/chatai?sslmode=disable"
+      GUARDRAILS: "nim-nemo,model-armor"
+      MODEL_ARMOR_PRIVATE_KEY: ""
+      MODEL_ARMOR_PRIVATE_KEY_ID: ""
+      GOOGLE_VISION_API_KEY: ""
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      RAG_RERANKING_ENGINE: "openai"
+      RAG_RERANKING_MODEL: "gpt-4o"
+      MODELS: "openai/gpt-4o, openai/gpt-5-mini, openai/gpt-4.1, openai/gpt-5.1, openai/gpt-5-nano, bedrock/amazon.titan-text-premier-v1:0, bedrock/us.meta.llama4-maverick-17b-instruct-v1:0, bedrock/mistral.mistral-large-2407-v1:0, bedrock/openai.gpt-oss-20b-1:0, bedrock/openai.gpt-oss-120b-1:0, bedrock/qwen.qwen3-235b-a22b-2507-v1:0, bedrock/qwen.qwen3-vl-235b-a22b, bedrock/moonshotai.kimi-k2.5, bedrock/mistral.mistral-large-3-675b-instruct, bedrock/amazon.nova-pro-v1:0, bedrock/mistral.ministral-3-14b-instruct"
+      RAG_EMBEDDING_TYPE: "vllm"
+      RAG_BEDROCK_EMBEDDING_MODEL: "amazon.titan-embed-text-v1"
+      ENABLE_DOCIQ: "true"
+      DOCLING_SERVER_URL: "http://imbrace-svc-docling-service:5001"
+      DOCIQ_DEV_API_KEY: "oss-dociq-key"
+      DOCIQ_CLASSIFIER_ENGINE: "hybrid"
+      DOCIQ_WORK_CLASS: "any"
+      DOCIQ_KAFKA_BOOTSTRAP: "imbrace-svc-kafka:9092"
+      DOCIQ_KAFKA_TOPIC: "AI_SERVICE.DOCIQ_JOB"
+      KAFKA_USE_SSL: "false"
+      KAFKA_USE_SASL: "false"
+      KAFKA_SASL_MECHANISM: "plain"
+      KAFKA_SASL_USERNAME: ""
+      KAFKA_SASL_PASSWORD: ""
+      KAFKA_USE_SSL_REJECT_UNAUTHORIZED: "false"
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-chat-ai
+          - imbrace-svc-chat-ai.imbrace-services
+
+  # ===========================================================================
+  # DOCLING SERVICE — document conversion / OCR, consumed by chat-ai's DocIQ
+  # pipeline at http://imbrace-svc-docling-service:5001. In-network only.
+  # NOTE: :latest is not reproducible — pin a digest/dated tag for prod.
+  # ===========================================================================
+
+  docling-service:
+    image: quay.io/docling-project/docling-serve:latest
+    container_name: imbrace-svc-docling-service
+    restart: unless-stopped
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "true"
+      DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "true"
+      DOCLING_SERVE_MAX_SYNC_WAIT: "600"
+      DOCLING_SERVE_ENG_LOC_NUM_WORKERS: "2"
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+      UVICORN_WORKERS: "1"
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-docling-service
+          - imbrace-svc-docling-service.imbrace-services
+
+  # ===========================================================================
+  # AI-AGENT — Next Best Action / aiToolLoopAgent. Uses the shared `postgres`
+  # database: db-init grants CREATE to `imbrace`, then db-migrate runs
+  # node server/dist/database/migrate.js (chart init container).
+  # Container listens on :3000; published on host :30040 (chart NodePort).
+  # ===========================================================================
+
+  ai-agent-db-init:
+    <<: *db-init
+    environment:
+      PGHOST: imbrace-svc-postgresql
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      PGSUPERUSER: postgres
+      PGSUPERPASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "[init] waiting for Postgres at $$PGHOST:$$PGPORT..."
+        until pg_isready -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" >/dev/null 2>&1; do sleep 3; done
+        echo "[init] granting CREATE on $$PGDATABASE / public to imbrace (drizzle migrator)..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d "$$PGDATABASE" -v ON_ERROR_STOP=1 \
+          -c "GRANT CREATE ON DATABASE \"$$PGDATABASE\" TO imbrace;" \
+          -c "GRANT CREATE, USAGE ON SCHEMA public TO imbrace;"
+        echo "[init] done"
+
+  ai-agent-db-migrate:
+    image: docker.io/imbraceltd/ai-agent:v0.0.5-0aaf9aa
+    restart: "no"
+    depends_on:
+      ai-agent-db-init:
+        condition: service_completed_successfully
+    command: ["node", "server/dist/database/migrate.js"]
+    environment: *ai-agent-env
+    networks: [imbrace-net]
+
+  ai-agent:
+    image: docker.io/imbraceltd/ai-agent:v0.0.5-0aaf9aa
+    container_name: imbrace-svc-ai-agent
+    restart: unless-stopped
+    depends_on:
+      ai-agent-db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "30040:3000"
+    environment: *ai-agent-env
+    volumes:
+      - agent-files:/mnt/data/files/aiToolLoopAgent
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-ai-agent
+          - imbrace-svc-ai-agent.imbrace-services
+
+  # ===========================================================================
+  # APWORKFLOW (Activepieces)
+  #   db-init    : role `imbrace` + database `apworkflowdb` (post-install hook
+  #                parity: templates/apworkflow-db-init-job.yaml)
+  #   db-migrate : TypeORM migrations (apworkflowApi db-migrate init container)
+  #   api        : REST API + engine (AP_CONTAINER_TYPE=WORKER_AND_APP, :3000)
+  #   app        : React SPA (nginx, :4200)
+  #   worker     : flow engine (AP_CONTAINER_TYPE=WORKER, :3001)
+  #   proxy      : combined NodePort proxy — host :30700 -> / (app) + /api (api)
+  # ===========================================================================
+
+  apworkflow-db-init:
+    <<: *db-init
+    environment:
+      PGHOST: imbrace-svc-postgresql
+      PGPORT: "5432"
+      PGDATABASE: apworkflowdb
+      PGSUPERUSER: postgres
+      PGSUPERPASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+      IMBRACE_USERNAME: imbrace
+      IMBRACE_PASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "[init] waiting for Postgres at $$PGHOST:$$PGPORT..."
+        until pg_isready -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" >/dev/null 2>&1; do sleep 3; done
+        echo "[init] ensuring role '$$IMBRACE_USERNAME' (idempotent)..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+        SELECT 'CREATE ROLE $$IMBRACE_USERNAME LOGIN PASSWORD ''$$IMBRACE_PASSWORD'' CREATEDB'
+        WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$$IMBRACE_USERNAME')\gexec
+        SQL
+        echo "[init] ensuring database '$$PGDATABASE' (idempotent)..."
+        PGPASSWORD="$$PGSUPERPASSWORD" psql -h "$$PGHOST" -p "$$PGPORT" -U "$$PGSUPERUSER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+        SELECT 'CREATE DATABASE $$PGDATABASE OWNER $$IMBRACE_USERNAME'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$$PGDATABASE')\gexec
+        SQL
+        echo "[init] done"
+
+  apworkflow-db-migrate:
+    image: docker.io/imbraceltd/apwf:dev-be-93efe14
+    restart: "no"
+    depends_on:
+      apworkflow-db-init:
+        condition: service_completed_successfully
+    environment:
+      NX_DAEMON: "false"
+      AP_DB_TYPE: POSTGRES
+      AP_POSTGRES_HOST: imbrace-svc-postgresql
+      AP_POSTGRES_PORT: "5432"
+      AP_POSTGRES_DATABASE: apworkflowdb
+      AP_POSTGRES_USERNAME: imbrace
+      AP_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
+    command: ["/bin/sh", "-c", "echo '[migrate] running server-api:db-migrate ...' && npx nx run server-api:db-migrate && echo '[migrate] done'"]
+    networks: [imbrace-net]
+
+  apworkflow-api:
+    image: docker.io/imbraceltd/apwf:dev-be-93efe14
+    container_name: imbrace-svc-apworkflow-api
+    restart: unless-stopped
+    depends_on:
+      apworkflow-db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      <<: *ap-secrets
+      AP_CONTAINER_TYPE: "WORKER_AND_APP"
+      AP_DB_TYPE: "POSTGRES"
+      AP_POSTGRES_DATABASE: "apworkflowdb"
+      AP_POSTGRES_HOST: "imbrace-svc-postgresql"
+      AP_POSTGRES_PORT: "5432"
+      AP_POSTGRES_USERNAME: "imbrace"
+      AP_EXECUTION_MODE: "UNSANDBOXED"
+      AP_REDIS_TYPE: "STANDALONE"
+      AP_REDIS_HOST: "imbrace-svc-redis-client"
+      AP_REDIS_PORT: "6379"
+      AP_REDIS_DB: "0"
+      AP_API_KEY: "ap-api-key"
+      AP_INTERNAL_URL: "http://imbrace-svc-apworkflow-api:3000/"
+      AP_FRONTEND_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700"
+      ENGINE_URL: "http://imbrace-svc-apworkflow-worker:3001"
+      AP_ENGINE_WS_PORT: "12345"
+      AP_SHARED_PLATFORM_ID: "hVQYqpHY8OpeQbL7FJGnE"
+      AP_WEBHOOK_TIMEOUT_SECONDS: "700"
+      AP_TRIGGER_DEFAULT_POLL_INTERVAL: "5"
+      AP_FLOW_TIMEOUT_SECONDS: "1000"
+      AP_WORKER_CONCURRENCY: "10"
+      AP_TELEMETRY_ENABLED: "false"
+      AP_PIECES_SOURCE: "BUILTIN"
+      NX_DAEMON: "false"
+      AP_PIECES_SYNC_MODE: "BUILTIN"
+      GATEWAY_URL: "http://imbrace-svc-app-gateway:9001/activepieces"
+      KAFKA_ENABLED: "true"
+      KAFKA_CLIENT_ID: "wcs-producer-imbrace"
+      KAFKA_ENDPOINT: "imbrace-svc-kafka:9092"
+      KAFKA_USE_SSL: "false"
+      KAFKA_USE_SASL: "false"
+      KAFKA_SASL_MECHANISM: "plain"
+      KAFKA_SASL_USERNAME: ""
+      KAFKA_SASL_PASSWORD: ""
+      KAFKA_PARTITION: ""
+      KAFKA_SSL_REJECT_UNAUTHORIZED: "false"
+      KAFKA_IS_AWS_KAFKA: "false"
+      KAFKA_CONSUMER_GROUP_ID: "activepieces-flows-stable"
+      KAFKA_TOPIC: "AP_INCOMING_MESSAGE,AP_OUTGOING_CRM_EVENT"
+      KAFKA_AUTO_COMMIT: "true"
+      KAFKA_MAX_BYTES_PER_PARTITION: "1048576"
+      KAFKA_FROM_BEGINNING: "true"
+      IMBRACE_API_DOMAIN: "http://imbrace-svc-app-gateway:9001"
+      IMBRACE_API_OLD_DOMAIN: "https://app-api.your-domain.com"
+      IMBRACE_PRIVATE_API: "http://imbrace-svc-platform-service:6040"
+      IMBRACE_CHANNEL_API: "http://imbrace-svc-channel-service:4000"
+      IMBRACE_DATABOARD_API: "http://imbrace-svc-data-board:8866"
+      PLATFORM_SERVICE_API: "http://imbrace-svc-platform-service:6040"
+      # ai-agent container listens on 3000 (the k8s Service remapped 80->3000)
+      MESSAGE_SUGGESTION_API: "http://imbrace-svc-ai-agent:3000"
+      REDIS_HOST: "imbrace-svc-redis-client"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-imbrace-dev-redis-pass}
+      REDIS_DB: "0"
+      REDIS_TLS: "false"
+      REDIS_TLS_REJECT_UNAUTHORIZED: "false"
+      AWS_REGION: "garage"
+      AWS_ACCESS_KEY_ID: ${GARAGE_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${GARAGE_KEY_SECRET:-}
+      AWS_ENDPOINT_URL_S3: "http://imbrace-svc-garage:3900"
+      AWS_ENDPOINT_URL: "http://imbrace-svc-garage:3900"
+      S3_ENDPOINT: "http://imbrace-svc-garage:3900"
+      S3_FORCE_PATH_STYLE: "true"
+      AWS_S3_FORCE_PATH_STYLE: "true"
+      DOCUMENT_API_VERSION: "v2"
+      AWS_S3_BUCKET: "imbrace"
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-apworkflow-api
+          - imbrace-svc-apworkflow-api.imbrace-services
+
+  apworkflow-app:
+    image: docker.io/imbraceltd/apwf:dev-fe-3da8b95
+    container_name: imbrace-svc-apworkflow-app
+    restart: unless-stopped
+    environment:
+      AP_ENVIRONMENT: "dev"
+      # allowed origins: proxy :30700, unified web :6868, ws :6868
+      WEBAPP_ORIGIN: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700 ${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868 ${WS_SCHEME:-ws}://${PUBLIC_HOST:-localhost}:6868"
+      BACKEND_UPSTREAM: "http://imbrace-svc-apworkflow-api:3000"
+      AP_FRONTEND_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700"
+      AP_INTERNAL_URL: "http://imbrace-svc-apworkflow-api:3000/api"
+      BASE_PATH: ""
+      GATEWAY_URL: "http://imbrace-svc-app-gateway:9001/activepieces"
+      VITE_GATEWAY_URL: "http://imbrace-svc-apworkflow-app:4200"
+      AP_GATEWAY_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/api"
+      VITE_APP_GATEWAY_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/api"
+      IMBRACE_API_DOMAIN: "http://imbrace-svc-app-gateway:9001"
+      AP_IMBRACE_ADDING_CONNECTION_PIECES: "@activepieces/piece-google-calendar,@activepieces/piece-calendly,@activepieces/piece-google-drive,@activepieces/piece-google-docs,@activepieces/piece-clickup"
+      AP_CHAT_WIDGET: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30050"
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-apworkflow-app
+          - imbrace-svc-apworkflow-app.imbrace-services
+
+  apworkflow-worker:
+    image: docker.io/imbraceltd/apwf:dev-engine-9f677c6
+    container_name: imbrace-svc-apworkflow-worker
+    restart: unless-stopped
+    depends_on:
+      apworkflow-db-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *ap-secrets
+      AP_CONTAINER_TYPE: "WORKER"
+      NODE_ENV: "development"
+      ENGINE_PORT: "3001"
+      AP_BACKEND_URL: "http://imbrace-svc-apworkflow-api:3000"
+      AP_ENGINE_WS_PORT: "12345"
+      WORKER_ID: "imbrace-svc-apworkflow-worker-0"
+      NX_PLUGIN_NO_TIMEOUTS: "true"
+      NX_DAEMON: "false"
+      AP_EXECUTION_MODE: "UNSANDBOXED"
+      AP_BASE_CODE_DIRECTORY: "/usr/src/app/codes"
+      AP_CACHE_PATH: "/usr/src/app/cache"
+      AP_PIECES_SOURCE: "FILE"
+      AP_DEV_PIECES: "google-sheets,webhook,whatsapp,http,common,common-ai,framework,send-message,crypto,csv,data-mapper,data-summarizer,date-helper,delay,file-helper,forms,graphql,image-helper,math-helper,qrcode,schedule,sftp,store,subflows,tables,tags,text-helper,todos,xml,connections,smtp"
+      AP_PIECES_SYNC_MODE: "NONE"
+      KAFKA_ENABLED: "true"
+      KAFKA_CLIENT_ID: "wcs-producer-imbrace"
+      KAFKA_ENDPOINT: "imbrace-svc-kafka:9092"
+      KAFKA_USE_SSL: "false"
+      KAFKA_USE_SASL: "false"
+      KAFKA_SASL_MECHANISM: "plain"
+      KAFKA_SASL_USERNAME: ""
+      KAFKA_SASL_PASSWORD: ""
+      KAFKA_PARTITION: ""
+      KAFKA_IS_AWS_KAFKA: "false"
+      KAFKA_SSL_REJECT_UNAUTHORIZED: "false"
+      KAFKA_CONSUMER_GROUP_ID: "activepieces-flows"
+      KAFKA_TOPIC: "AP_INCOMING_MESSAGE,AP_OUTGOING_CRM_EVENT"
+      KAFKA_AUTO_COMMIT: "false"
+      KAFKA_MAX_BYTES_PER_PARTITION: "1048576"
+      KAFKA_FROM_BEGINNING: "false"
+      AP_QUEUE_MODE: "REDIS"
+      AP_DB_TYPE: "POSTGRES"
+      AP_POSTGRES_DATABASE: "apworkflowdb"
+      AP_POSTGRES_HOST: "imbrace-svc-postgresql"
+      AP_POSTGRES_PORT: "5432"
+      AP_POSTGRES_USERNAME: "imbrace"
+      AP_FRONTEND_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700"
+      IMBRACE_API_DOMAIN: "http://imbrace-svc-app-gateway:9001"
+      MESSAGE_SUGGESTION_API: "http://imbrace-svc-ai-agent:3000"
+      PLATFORM_SERVICE_API: "http://imbrace-svc-platform-service:6040"
+      AWS_S3_BUCKET: "imbrace"
+      AP_REDIS_HOST: "imbrace-svc-redis-client"
+      AP_REDIS_PORT: "6379"
+      AP_REDIS_DB: "0"
+      REDIS_HOST: "imbrace-svc-redis-client"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-imbrace-dev-redis-pass}
+      REDIS_DB: "0"
+      REDIS_TLS: "false"
+      REDIS_TLS_REJECT_UNAUTHORIZED: "false"
+      AWS_REGION: "garage"
+      AWS_ACCESS_KEY_ID: ${GARAGE_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${GARAGE_KEY_SECRET:-}
+      AWS_ENDPOINT_URL_S3: "http://imbrace-svc-garage:3900"
+      AWS_ENDPOINT_URL: "http://imbrace-svc-garage:3900"
+      S3_ENDPOINT: "http://imbrace-svc-garage:3900"
+      S3_FORCE_PATH_STYLE: "true"
+      AWS_S3_FORCE_PATH_STYLE: "true"
+    volumes:
+      - worker-codes:/usr/src/app/codes
+      - worker-cache:/usr/src/app/cache
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-apworkflow-worker
+          - imbrace-svc-apworkflow-worker.imbrace-services
+
+  apworkflow-proxy:
+    image: docker.io/library/nginx:1.27-alpine
+    container_name: imbrace-svc-apworkflow-proxy
+    restart: unless-stopped
+    ports:
+      - "30700:8080"
+    configs:
+      - source: apworkflow-proxy-nginx
+        target: /etc/nginx/nginx.conf
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-apworkflow-proxy
+          - imbrace-apworkflow-proxy
+
+  # ===========================================================================
+  # APP GATEWAY — IMBRACE BFF (:9001), reached publicly through the edge proxy
+  # at <PUBLIC_HOST>:6868/api (prefix stripped). Licenses persist in a volume
+  # (chart: licenses PVC at /app/licenses).
+  # ===========================================================================
+
+  app-gateway:
+    image: docker.io/imbraceltd/app-gateway:v0.0.10-319d3a1
+    container_name: imbrace-svc-app-gateway
+    restart: unless-stopped
+    # The gateway wires its upstreams at startup (chart frontendRedeploy hook
+    # parity) — start it after the backends.
+    depends_on:
+      platform-service:
+        condition: service_started
+      channel-service:
+        condition: service_started
+      data-board:
+        condition: service_started
+      marketplace:
+        condition: service_started
+      file-service:
+        condition: service_started
+      chat-ai:
+        condition: service_started
+      ai-agent:
+        condition: service_started
+      apworkflow-api:
+        condition: service_started
+    environment:
+      ENV: "production"
+      VERSION: "1.0.0"
+      PUBLIC_SERVER_PORT: "9001"
+      LOG_LEVEL: "info"
+      RATELIMIT_WINDOW: "1800000"
+      RATELIMIT_MAX_REQUEST_PER_WINDOW: "100"
+      BACKEND_PUBLIC_HOST: "http://imbrace-svc-platform-service:6040"
+      BACKEND_PRIVATE_HOST: "http://imbrace-svc-platform-service:6040"
+      AI_SERVICE: "http://imbrace-svc-chat-ai:8080"
+      MARKETPLACE_SERVICE: "http://imbrace-svc-marketplace:4000"
+      AI_SERVICE_PYTHON: "http://imbrace-svc-chat-ai:8080"
+      AI_SERVICE_CHAT: "http://imbrace-svc-chat-ai:8080"
+      AI_CHAT_WEBSOCKET: "http://imbrace-svc-chat-ai:8080"
+      image_tag: ""
+      log_group: ""
+      FILE_SERVICE_HOST: "http://imbrace-svc-file-service:8866"
+      DATA_BOARD_HOST: "http://imbrace-svc-data-board:8866"
+      DATA_BOARD_PROXY_TOKEN: ""
+      DATA_BOARD_PROXY_TIMEOUT_MS: "300000"
+      ACTIVEPIECES_BACKEND_HOST: "http://imbrace-svc-apworkflow-api:3000"
+      ACTIVEPIECES_ENGINE_HOST: "http://imbrace-svc-apworkflow-worker:3001"
+      ACTIVEPIECES_WS_HOST: "http://imbrace-svc-apworkflow-api:3000"
+      WORKFLOW_HOST: "http://imbrace-svc-apworkflow-api:3000"
+      ACTIVEPIECES_TRUSTED_SOURCES: "localhost,127.0.0.1,${PUBLIC_HOST:-localhost}:6868,${PUBLIC_HOST:-localhost}:30700,imbrace-svc-apworkflow-api,imbrace-svc-apworkflow-api.imbrace-services,*.imbrace.local,imbrace.local,apwf.imbrace.local,apwf.dev.imbrace.lan,apwf.dev.imbrace.co"
+      PLATFORM_SERVICE_HOST: "http://imbrace-svc-platform-service:6040"
+      CHANNEL_SERVICE_HOST: "http://imbrace-svc-channel-service:4000"
+      CHANNEL_SERVICE_ENABLED: "true"
+      AUTH_SERVICE_URL: "http://imbrace-svc-platform-service:6040"
+      # ai-agent container listens on 3000 (the k8s Service remapped 80->3000)
+      MESSAGE_SUGGESTION_HOST: "http://imbrace-svc-ai-agent:3000"
+      PROMETHEUS_HOST: "http://imbrace-prometheus:9090"
+      RELEASE_FEED_URL: "https://imbrace-install-tool.s3.ap-east-1.amazonaws.com/oss/latest.json"
+      RELEASE_CHECK_STATE_DIR: "/tmp/release-check"
+    volumes:
+      - licenses:/app/licenses
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-app-gateway
+          - imbrace-svc-app-gateway.imbrace-services
+          - imbrace-svc-app-gateway.imbrace-services.svc.cluster.local
+
+  # ===========================================================================
+  # FRONTENDS
+  # ===========================================================================
+
+  # Dashboard SPA (nginx-served Vite build). Runtime config is delivered as ENV
+  # VARS (the OSS image writes its own env.json at startup). Served publicly at
+  # <PUBLIC_HOST>:6868/ via the edge proxy.
+  imbrace-fe:
+    image: docker.io/imbraceltd/imbrace-fe:v0.0.15-f012f20
+    container_name: imbrace-svc-imbrace-fe
+    restart: unless-stopped
+    depends_on:
+      app-gateway:
+        condition: service_started
+    environment:
+      VITE_APP_ENV: "prod"
+      VITE_APP_HOST: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868"
+      VITE_IS_MULTI_TENANCY: "true"
+      VITE_APP_API_HOST: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/api"
+      VITE_APP_API_HOST_OLD: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/api"
+      VITE_APP_AI_HOST: ""
+      VITE_APP_INTERNAL_AI_CHAT_HOST: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30030"
+      VITE_APP_CHAT_HOST: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30050"
+      VITE_APP_API_CHAT_HOST: ""
+      VITE_APP_N8N_DOMAIN: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700"
+      VITE_APP_N8N_DOMAIN_V2: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700"
+      VITE_APP_ACTIVEPIECES_DOMAIN: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700"
+      # apworkflow combined proxy (chart: <release>-apworkflow-proxy:80)
+      APWF_URL: "http://imbrace-svc-apworkflow-proxy:8080"
+      BACKEND_URL: "http://imbrace-svc-app-gateway:9001"
+      VITE_APP_ON_PREMISE: "true"
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-imbrace-fe
+          - imbrace-svc-imbrace-fe.imbrace-services
+
+  # insightIQ — AI chat SPA (imbrace-ai-chatbot). The image reads env vars at
+  # startup and writes its own env.json. Published on host :30030 (chart
+  # NodePort) so the dashboard's VITE_APP_INTERNAL_AI_CHAT_HOST is reachable
+  # from the browser.
+  insightiq:
+    image: docker.io/imbraceltd/imbrace-ai-chatbot:v0.0.2-b860d6b
+    container_name: imbrace-svc-insightiq
+    restart: unless-stopped
+    depends_on:
+      app-gateway:
+        condition: service_started
+    ports:
+      - "30030:3000"
+    environment:
+      IMBRACE_BASE_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868"
+      IMBRACE_APP_GATEWAY_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868"
+      IMBRACE_WORKFLOW_DOMAIN: "${PUBLIC_HOST:-localhost}:30700"
+      IMBRACE_NEXT_BEST_ACTION_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30040"
+      BACKEND: "http://imbrace-svc-app-gateway:9001"
+      BACKEND_HOST: "imbrace-svc-app-gateway:9001"
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-insightiq
+          - imbrace-svc-insightiq.imbrace-services
+
+  # Embeddable chat widget. Entrypoint writes $$WIDGET_ENV to
+  # /usr/share/nginx/html/env, then runs /generate-env-json.sh (ECS task-def
+  # parity). Published on host :30050 (chart NodePort).
+  chat-widget:
+    image: docker.io/imbraceltd/imbrace-chat-widget:v0.0.5-e310c76
+    container_name: imbrace-svc-chat-widget
+    restart: unless-stopped
+    depends_on:
+      app-gateway:
+        condition: service_started
+    ports:
+      - "30050:3000"
+    command: ["/bin/sh", "-c", "printf '%s' \"$$WIDGET_ENV\" > /usr/share/nginx/html/env && exec /generate-env-json.sh"]
+    environment:
+      APP_GATEWAY_URL: "http://imbrace-svc-app-gateway:9001"
+      VITE_APP_API_HOST: "http://imbrace-svc-app-gateway:9001"
+      PORT: "3000"
+      VITE_APP_CHAT_WIDGET_HOST: "http://imbrace-svc-chat-widget:3000"
+      NODE_ENV: "production"
+      SKIP_PREFLIGHT_CHECK: "true"
+      VITE_APP_ENV: "oss"
+      WIDGET_ENV: |-
+        SKIP_PREFLIGHT_CHECK=true
+        GENERATE_SOURCEMAP=false
+        VITE_APP_ENV=oss
+        VITE_APP_API_HOST=${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868/api
+        VITE_APP_CHAT_WIDGET_HOST=${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30050
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-chat-widget
+          - imbrace-svc-chat-widget.imbrace-services
+
+  # ===========================================================================
+  # EDGE PROXY — replaces the chart's unified Traefik IngressRoute
+  # (templates/apworkflow-ingress.yaml). Single entry point on :6868:
+  #   /api/*       -> app-gateway:9001 (prefix /api STRIPPED, like the Traefik
+  #                   stripPrefix middleware)
+  #   /ws          -> app-gateway:9001 (forwarded unchanged)
+  #   /socket.io   -> apworkflow-api:3000 (forwarded unchanged)
+  #   /ap-workflow -> apworkflow-api:3000 (forwarded unchanged)
+  #   /            -> imbrace-fe:80 (dashboard SPA)
+  # ===========================================================================
+
+  edge-proxy:
+    image: docker.io/library/nginx:1.27-alpine
+    container_name: imbrace-edge-proxy
+    restart: unless-stopped
+    depends_on:
+      imbrace-fe:
+        condition: service_started
+      app-gateway:
+        condition: service_started
+      apworkflow-api:
+        condition: service_started
+    ports:
+      - "6868:6868"
+    configs:
+      - source: edge-proxy-nginx
+        target: /etc/nginx/nginx.conf
+    networks:
+      imbrace-net:
+
+  # ===========================================================================
+  # OPTIONAL — GPU model servers (profiles: qwen / gemma4 / embedding).
+  # Converted from the ai-vllm-qwen / ai-vllm-gemma4 / ai-vllm-embedding
+  # subcharts (all disabled by default in the chart — they need an NVIDIA GPU +
+  # models staged under /opt/imbrace/hf_home).
+  # chat-ai / ai-agent point at imbrace-svc-ai-vllm-qwen:6976 by default.
+  # ===========================================================================
+
+  ai-vllm-qwen:
+    <<: *vllm
+    profiles: [qwen]
+    image: docker.io/vllm/vllm-openai:latest-cu130
+    container_name: imbrace-svc-ai-vllm-qwen
+    command:
+      - "--model"
+      - "/opt/imbrace/hf_home/hub/models--Qwen--Qwen3.5-35B-A3B"
+      - "--trust-remote-code"
+      - "--gpu-memory-utilization"
+      - "0.6"
+      - "--max-model-len"
+      - "40960"
+      - "--max-num-seqs"
+      - "4"
+      - "--enforce-eager"
+      - "--max-num-batched-tokens"
+      - "4096"
+      - "--enable-prefix-caching"
+      - "--enable-chunked-prefill"
+      - "--reasoning-parser"
+      - "qwen3"
+      - "--enable-auto-tool-choice"
+      - "--tool-call-parser"
+      - "qwen3_coder"
+      - "--served-model-name"
+      - "qwen3.5-35b-a3b"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "6976"
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-ai-vllm-qwen
+          - imbrace-svc-ai-vllm-qwen.imbrace-services
+
+  ai-vllm-gemma4:
+    <<: *vllm
+    profiles: [gemma4]
+    image: docker.io/vllm/vllm-openai:latest-cu130
+    container_name: imbrace-svc-ai-vllm-gemma4
+    command:
+      - "--model"
+      - "/opt/imbrace/hf_home/gemma-4-26B-A4B-it"
+      - "--trust-remote-code"
+      - "--gpu-memory-utilization"
+      - "0.5"
+      - "--max-model-len"
+      - "65536"
+      - "--max-num-seqs"
+      - "4"
+      - "--max-num-batched-tokens"
+      - "4096"
+      - "--enable-prefix-caching"
+      - "--enable-chunked-prefill"
+      - "--enable-auto-tool-choice"
+      - "--tool-call-parser"
+      - "gemma4"
+      - "--served-model-name"
+      - "gemma-4-26b-a4b-it"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "6977"
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-ai-vllm-gemma4
+          - imbrace-svc-ai-vllm-gemma4.imbrace-services
+
+  ai-vllm-embedding:
+    <<: *vllm
+    profiles: [embedding]
+    image: docker.io/vllm/vllm-openai:latest
+    container_name: imbrace-svc-ai-vllm-embedding
+    # Chart serves container :8000 behind a Service on :6977 — no port
+    # remapping in docker, so vLLM listens on 6977 directly here.
+    command:
+      - "Qwen/Qwen3-Embedding-4B"
+      - "--served-model-name"
+      - "qwen3-embedding"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "6977"
+      - "--max-model-len"
+      - "4096"
+      - "--gpu-memory-utilization"
+      - "0.1"
+      - "--hf-overrides"
+      - '{"is_matryoshka":true,"matryoshka_dimensions":[32,64,128,256,512,768,1024,1536,2048,2560]}'
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-svc-ai-vllm-embedding
+          - imbrace-svc-ai-vllm-embedding.imbrace-services
+
+  # ===========================================================================
+  # OPTIONAL — logs + metrics (profile: logging). Converted from the chart's
+  # logging-* templates (Loki + Alloy + Grafana + Prometheus). In k8s Alloy
+  # tails /var/log/pods; here it discovers Docker containers via the socket.
+  # Grafana: http://<PUBLIC_HOST>:36868 (admin/admin — rotate for prod).
+  # ===========================================================================
+
+  loki:
+    image: docker.io/grafana/loki:3.5.7
+    container_name: imbrace-loki
+    profiles: [logging]
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - loki-data:/loki
+    configs:
+      - source: loki-config
+        target: /etc/loki/loki.yaml
+    networks:
+      imbrace-net:
+        aliases: [imbrace-loki]
+
+  alloy:
+    image: docker.io/grafana/alloy:v1.17.1
+    container_name: imbrace-alloy
+    profiles: [logging]
+    restart: unless-stopped
+    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+    configs:
+      - source: alloy-config
+        target: /etc/alloy/config.alloy
+    networks:
+      imbrace-net:
+
+  prometheus:
+    image: docker.io/prom/prometheus:v2.53.0
+    container_name: imbrace-prometheus
+    profiles: [logging]
+    restart: unless-stopped
+    volumes:
+      - prom-data:/prometheus
+    configs:
+      - source: prometheus-config
+        target: /etc/prometheus/prometheus.yml
+    networks:
+      imbrace-net:
+        aliases:
+          - imbrace-prometheus
+          - imbrace-prometheus.imbrace-services
+
+  grafana:
+    image: docker.io/grafana/grafana:12.3.8
+    container_name: imbrace-grafana
+    profiles: [logging]
+    restart: unless-stopped
+    ports:
+      - "36868:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    configs:
+      - source: grafana-datasources
+        target: /etc/grafana/provisioning/datasources/datasources.yaml
+    networks:
+      imbrace-net:
+
+# =============================================================================
+# INLINE CONFIG FILES
+# NOTE: compose interpolates `content`, so every literal `$` is written as `$$`.
+# =============================================================================
+configs:
+
+  # Converted from templates/postgresql-initdb-cm.yaml
+  # (imbrace-svc-postgresql-initdb). Runs once on FIRST cluster init (empty
+  # PGDATA), before postgres accepts external connections. Idempotent.
+  postgres-initdb:
+    content: |
+      #!/bin/sh
+      set -e
+
+      : "$${IMBRACE_DB_USER:=imbrace}"
+      : "$${IMBRACE_DB_PASSWORD:=changeme-postgres-pass}"
+
+      # 00 — app role + grants on the default `imbrace` DB
+      psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d postgres <<EOSQL
+      SELECT 'CREATE ROLE $$IMBRACE_DB_USER LOGIN PASSWORD ''$$IMBRACE_DB_PASSWORD'' CREATEDB'
+      WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$$IMBRACE_DB_USER')\gexec
+
+      GRANT ALL PRIVILEGES ON DATABASE imbrace TO $$IMBRACE_DB_USER;
+      EOSQL
+      psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d imbrace \
+        -c "GRANT ALL ON SCHEMA public TO $$IMBRACE_DB_USER;"
+
+      # 01 — sibling databases (head-start; each service's db-init re-ensures its own)
+      psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d postgres <<EOSQL
+      SELECT 'CREATE DATABASE apworkflowdb OWNER $$IMBRACE_DB_USER'
+      WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'apworkflowdb')\gexec
+
+      SELECT 'CREATE DATABASE chatai OWNER postgres'
+      WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'chatai')\gexec
+
+      SELECT 'CREATE DATABASE databoard OWNER $$IMBRACE_DB_USER'
+      WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'databoard')\gexec
+      EOSQL
+
+      # 02 — pgvector in chatai
+      psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d chatai \
+        -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      echo "[initdb] imbrace role + databases + pgvector ready"
+
+  # Garage v2 config — parity with the garage subchart values
+  # (db_engine lmdb, replication_factor 1, block_size 1MiB, region "garage").
+  garage-config:
+    content: |
+      metadata_dir = "/var/lib/garage/meta"
+      data_dir = "/var/lib/garage/data"
+      db_engine = "lmdb"
+
+      replication_factor = 1
+      consistency_mode = "consistent"
+      compression_level = 1
+      block_size = 1048576
+
+      rpc_bind_addr = "[::]:3901"
+      rpc_public_addr = "imbrace-svc-garage:3901"
+      # Dev-only fixed secret (the chart auto-generates one). Rotate for prod:
+      #   openssl rand -hex 32
+      rpc_secret = "3e9c6b0d8a415f27c1d9e8b3a6f40217d5c8e9f1a2b3c4d5e6f708192a3b4c5d"
+
+      [s3_api]
+      s3_region = "garage"
+      api_bind_addr = "[::]:3900"
+      root_domain = ".s3.imbrace.local"
+
+      [s3_web]
+      bind_addr = "[::]:3902"
+      root_domain = ".web.imbrace.local"
+      index = "index.html"
+
+  # Unified entry point on :6868 (Traefik IngressRoute replacement).
+  edge-proxy-nginx:
+    content: |
+      worker_processes 1;
+      error_log /dev/stderr warn;
+      pid /tmp/nginx.pid;
+
+      events {
+        worker_connections 1024;
+      }
+
+      http {
+        access_log /dev/stdout;
+        sendfile on;
+        tcp_nopush on;
+        keepalive_timeout 65;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_connect_timeout 30s;
+        client_max_body_size 1g;
+
+        map $$http_upgrade $$connection_upgrade {
+          default upgrade;
+          ''      close;
+        }
+
+        # Resolve upstreams at request time so nginx starts even when app
+        # containers aren't up yet (Docker's embedded DNS).
+        resolver 127.0.0.11 valid=10s;
+
+        server {
+          listen 6868;
+          server_name _;
+
+          set $$gateway   imbrace-svc-app-gateway:9001;
+          set $$apwf_api  imbrace-svc-apworkflow-api:3000;
+          set $$dashboard imbrace-svc-imbrace-fe:80;
+
+          # /api -> app-gateway, prefix stripped (Traefik stripPrefix parity)
+          location = /api {
+            rewrite ^ / break;
+            proxy_pass http://$$gateway;
+            proxy_set_header Host $$host;
+          }
+          location /api/ {
+            rewrite ^/api/(.*)$$ /$$1 break;
+            proxy_pass http://$$gateway;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $$host;
+            proxy_set_header X-Real-IP         $$remote_addr;
+            proxy_set_header X-Forwarded-For   $$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $$scheme;
+            proxy_set_header Upgrade           $$http_upgrade;
+            proxy_set_header Connection        $$connection_upgrade;
+          }
+
+          # /ws -> app-gateway, path unchanged (websocket)
+          location /ws {
+            proxy_pass http://$$gateway;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $$host;
+            proxy_set_header X-Real-IP         $$remote_addr;
+            proxy_set_header X-Forwarded-For   $$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $$scheme;
+            proxy_set_header Upgrade           $$http_upgrade;
+            proxy_set_header Connection        $$connection_upgrade;
+          }
+
+          # /socket.io -> apworkflow API (websocket), path unchanged
+          location /socket.io {
+            proxy_pass http://$$apwf_api;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $$host;
+            proxy_set_header X-Real-IP         $$remote_addr;
+            proxy_set_header X-Forwarded-For   $$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $$scheme;
+            proxy_set_header Upgrade           $$http_upgrade;
+            proxy_set_header Connection        $$connection_upgrade;
+          }
+
+          # /ap-workflow -> apworkflow API, path unchanged
+          location /ap-workflow {
+            proxy_pass http://$$apwf_api;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $$host;
+            proxy_set_header X-Real-IP         $$remote_addr;
+            proxy_set_header X-Forwarded-For   $$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $$scheme;
+          }
+
+          # everything else -> dashboard SPA
+          location / {
+            proxy_pass http://$$dashboard;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $$host;
+            proxy_set_header X-Real-IP         $$remote_addr;
+            proxy_set_header X-Forwarded-For   $$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $$scheme;
+            proxy_set_header Upgrade           $$http_upgrade;
+            proxy_set_header Connection        $$connection_upgrade;
+          }
+        }
+      }
+
+  # apworkflow combined proxy — converted from
+  # templates/apworkflow-proxy-configmap.yaml. Host :30700 -> / (SPA),
+  # /api/ (REST, prefix stripped), /socket.io/ (ws).
+  apworkflow-proxy-nginx:
+    content: |
+      worker_processes 1;
+      error_log /dev/stderr warn;
+      pid /tmp/nginx.pid;
+
+      events {
+        worker_connections 1024;
+      }
+
+      http {
+        access_log /dev/stdout;
+        sendfile on;
+        tcp_nopush on;
+        keepalive_timeout 65;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_connect_timeout 30s;
+        client_max_body_size 1g;
+
+        map $$http_upgrade $$connection_upgrade {
+          default upgrade;
+          ''      close;
+        }
+
+        client_body_temp_path /tmp/client_body;
+        proxy_temp_path       /tmp/proxy;
+        fastcgi_temp_path     /tmp/fastcgi;
+        uwsgi_temp_path       /tmp/uwsgi;
+        scgi_temp_path        /tmp/scgi;
+
+        resolver 127.0.0.11 valid=10s;
+
+        server {
+          listen 8080;
+          server_name _;
+
+          set $$apwf_api imbrace-svc-apworkflow-api:3000;
+          set $$apwf_app imbrace-svc-apworkflow-app:4200;
+
+          location /api/ {
+            rewrite ^/api/(.*)$$ /$$1 break;
+            proxy_pass http://$$apwf_api;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $$host;
+            proxy_set_header X-Real-IP         $$remote_addr;
+            proxy_set_header X-Forwarded-For   $$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $$scheme;
+            proxy_set_header Upgrade           $$http_upgrade;
+            proxy_set_header Connection        $$connection_upgrade;
+          }
+
+          location /socket.io/ {
+            proxy_pass http://$$apwf_api;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $$host;
+            proxy_set_header X-Real-IP         $$remote_addr;
+            proxy_set_header X-Forwarded-For   $$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $$scheme;
+            proxy_set_header Upgrade           $$http_upgrade;
+            proxy_set_header Connection        $$connection_upgrade;
+          }
+
+          location / {
+            proxy_pass http://$$apwf_app;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $$host;
+            proxy_set_header X-Real-IP         $$remote_addr;
+            proxy_set_header X-Forwarded-For   $$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $$scheme;
+            proxy_set_header Upgrade           $$http_upgrade;
+            proxy_set_header Connection        $$connection_upgrade;
+          }
+        }
+      }
+
+  # Loki single-binary, filesystem store — parity with the chart's logging.loki
+  # (retention 168h / 7 days).
+  loki-config:
+    content: |
+      auth_enabled: false
+
+      server:
+        http_listen_port: 3100
+
+      common:
+        instance_addr: 127.0.0.1
+        path_prefix: /loki
+        storage:
+          filesystem:
+            chunks_directory: /loki/chunks
+            rules_directory: /loki/rules
+        replication_factor: 1
+        ring:
+          kvstore:
+            store: inmemory
+
+      schema_config:
+        configs:
+          - from: 2024-01-01
+            store: tsdb
+            object_store: filesystem
+            schema: v13
+            index:
+              prefix: index_
+              period: 24h
+
+      limits_config:
+        retention_period: 168h
+
+      compactor:
+        working_directory: /loki/compactor
+        retention_enabled: true
+        delete_request_store: filesystem
+
+  # Alloy — tail every Docker container's logs and push to Loki.
+  # (k8s chart tails /var/log/pods; docker equivalent = docker discovery.)
+  alloy-config:
+    content: |
+      discovery.docker "containers" {
+        host = "unix:///var/run/docker.sock"
+      }
+
+      discovery.relabel "containers" {
+        targets = discovery.docker.containers.targets
+        rule {
+          source_labels = ["__meta_docker_container_name"]
+          regex         = "/(.*)"
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+          target_label  = "project"
+        }
+        rule {
+          source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+          target_label  = "service"
+        }
+      }
+
+      loki.source.docker "containers" {
+        host       = "unix:///var/run/docker.sock"
+        targets    = discovery.relabel.containers.output
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://imbrace-loki:3100/loki/api/v1/push"
+        }
+      }
+
+  # Prometheus — queried by app-gateway
+  # (PROMETHEUS_HOST=http://imbrace-prometheus:9090).
+  prometheus-config:
+    content: |
+      global:
+        scrape_interval: 30s
+
+      scrape_configs:
+        - job_name: prometheus
+          static_configs:
+            - targets: ["localhost:9090"]
+        # Add app scrape targets here if/when services expose /metrics, e.g.:
+        # - job_name: app-gateway
+        #   static_configs:
+        #     - targets: ["imbrace-svc-app-gateway:9001"]
+
+  grafana-datasources:
+    content: |
+      apiVersion: 1
+      datasources:
+        - name: Loki
+          type: loki
+          access: proxy
+          url: http://imbrace-loki:3100
+          isDefault: true
+        - name: Prometheus
+          type: prometheus
+          access: proxy
+          url: http://imbrace-prometheus:9090
+
+volumes:
+  pgdata:
+  redis-data:
+  kafka-data:
+  garage-meta:
+  garage-data:
+  file-data:
+  file-logs:
+  databoard-logs:
+  agent-files:
+  worker-codes:
+  worker-cache:
+  licenses:
+  loki-data:
+  alloy-data:
+  prom-data:
+  grafana-data:
+
+networks:
+  imbrace-net:
+    # Created as `imbrace_imbrace-net` by this project. Uncomment to pin the
+    # bare name (e.g. to attach other stacks that expect `imbrace-net`):
+    # name: imbrace-net
