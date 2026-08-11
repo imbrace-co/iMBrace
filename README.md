@@ -142,7 +142,7 @@ what this means for contributors.
 | [imbrace-ui](https://github.com/imbraceltd/imbrace-ui) | Shared UI component library (`@imbrace/ui`) | React · Storybook · Rollup |
 | [imbrace-chat-widget](https://github.com/imbraceltd/imbrace-chat-widget) | Embeddable chat widget (`<script>` drop-in) | Vite · React |
 | [imbrace-ai-chatbot](https://github.com/imbraceltd/imbrace-ai-chatbot) | AI chatbot single-page app | Vite · React 19 · AI SDK |
-| [chrome-extension](https://github.com/imbraceltd/chrome-extension) | Chat with your InsightIQ agents on any on-prem deployment | Chrome MV3 |
+
 
 ### Backend services
 | Repo | Description | Stack |
@@ -160,7 +160,7 @@ what this means for contributors.
 ### Workflow
 | Repo | Description | Stack |
 |---|---|---|
-| [ap-workflow](https://github.com/imbraceltd/ap-workflow) | Workflow automation engine (ActivePieces-based) | TypeScript · React |
+| [ap-workflow](https://github.com/imbraceltd/ap-workflow) | Workflow automation engine | TypeScript · React |
 
 ### SDK
 Developer tools for building **against** the platform (distributed as packages — `pip` / `npm`):
