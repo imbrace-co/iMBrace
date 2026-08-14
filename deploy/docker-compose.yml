@@ -49,7 +49,7 @@
 # PUBLISHED PORTS
 # -----------------------------------------------------------------------------
 #   6868   Dashboard + /api (edge-proxy)   login admin@imbrace.co / ChangeMe@12345
-#   30700  apworkflow (Activepieces)
+#   30700  apworkflow (Workflow)
 #   30040  ai-agent (Next Best Action)
 #   30030  insightIQ AI chat
 #   30050  chat widget
@@ -208,7 +208,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
       POSTGRES_DB: imbrace
       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
-      # Activepieces issues CREATE COLLATION ... PROVIDER='icu' at boot — the
+      # Workflow issues CREATE COLLATION ... PROVIDER='icu' at boot — the
       # cluster must be initdb'd with the ICU locale provider (chart parity).
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --encoding=UTF8 --locale-provider=icu --icu-locale=en-US"
       # Consumed by the initdb script (imbrace app role).
@@ -984,7 +984,7 @@ services:
           - imbrace-svc-ai-agent.imbrace-services
 
   # ===========================================================================
-  # APWORKFLOW (Activepieces)
+  # APWORKFLOW (Workflow)
   #   db-init    : role `imbrace` + database `apworkflowdb` (post-install hook
   #                parity: templates/apworkflow-db-init-job.yaml)
   #   db-migrate : TypeORM migrations (apworkflowApi db-migrate init container)

@@ -100,7 +100,7 @@ the printed key id/secret into `.env` as `GARAGE_KEY_ID` / `GARAGE_KEY_SECRET`.
 |---|---|
 | `http://<PUBLIC_HOST>:6868` | Dashboard — login `admin@imbrace.co` / `ChangeMe@12345` |
 | `http://<PUBLIC_HOST>:6868/api` | app-gateway API |
-| `http://<PUBLIC_HOST>:30700` | Workflow automation (Activepieces) |
+| `http://<PUBLIC_HOST>:30700` | Workflow automation |
 | `http://<PUBLIC_HOST>:30030` | insightIQ AI chat |
 | `http://<PUBLIC_HOST>:30050` | Embeddable chat widget |
 | `http://<PUBLIC_HOST>:30040` | AI agent (Next Best Action) |
