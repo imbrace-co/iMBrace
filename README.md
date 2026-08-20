@@ -1,12 +1,87 @@
-# iMBrace — Open Source
+<p align="center">
+  <a href="https://www.imbrace.co">
+    <img alt="iMBrace" src="imbrace-logo.png" width="96">
+  </a>
+</p>
 
-Central hub for the open-source repositories that make up the **iMBrace** platform: an
-AI-native workspace with agents, omnichannel conversations, data boards, document
-intelligence, and workflow automation.
+<h1 align="center">iMBrace</h1>
 
-This repository is the **front door** to the project — it explains how the pieces fit
-together, how they are licensed, and how to contribute. Each component lives in its own
-repository (linked below).
+<p align="center">
+  <b>The Governed AI Operating System — self-hosted, and now open source.</b>
+  <br>
+  <sub>Harness enterprise AI with <b>context</b>, <b>compliance</b>, and <b>confidence</b>.</sub>
+</p>
+
+<p align="center">
+  <a href="LICENSE.md"><img alt="License: Sustainable Use v1.0" src="https://img.shields.io/badge/License-Sustainable%20Use%20v1.0-1a73e8?style=flat"></a>
+  <img alt="Deploy: Docker Compose" src="https://img.shields.io/badge/Deploy-Docker%20Compose-1a73e8?style=flat&logo=docker&logoColor=white">
+  <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-1a73e8?style=flat"></a>
+  <img alt="Stars" src="https://img.shields.io/github/stars/imbraceltd/iMBrace?style=flat&color=1a73e8&label=stars">
+</p>
+
+<p align="center">
+  <a href="https://www.imbrace.co"><b>Website</b></a>
+  &nbsp;·&nbsp;
+  <a href="#quick-start--run-imbrace-with-docker-compose">Quick start</a>
+  &nbsp;·&nbsp;
+  <a href="#repositories">Repositories</a>
+  &nbsp;·&nbsp;
+  <a href="#license--please-read-first">License</a>
+  &nbsp;·&nbsp;
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+<br>
+
+> [!NOTE]
+> ### iMBrace Community Edition is now open source
+> Build context-aware AI on **your own** infrastructure — with your knowledge, models, data, and tools.
+> **100% self-hosted. Zero external data sharing.**
+
+**iMBrace** is an AI-native workspace that turns disconnected data into dynamic business
+intelligence — **agents, omnichannel conversations, data boards, document intelligence, and
+workflow automation**, all on infrastructure you control. This repository is the **front door**:
+it explains how the pieces fit together, how they are licensed, and how to run the whole stack.
+
+---
+
+## ✨ Why iMBrace
+
+<table>
+  <tr>
+    <td align="center" width="25%">
+      <br>🔒<br><br><b>Data Sovereignty</b><br>
+      <sub>Your data never leaves your own infrastructure.</sub><br><br>
+    </td>
+    <td align="center" width="25%">
+      <br>🔀<br><br><b>DAG Workflows</b><br>
+      <sub>Orchestrate complex automation as directed graphs.</sub><br><br>
+    </td>
+    <td align="center" width="25%">
+      <br>🔌<br><br><b>Native MCP Gateway</b><br>
+      <sub>Connect any tool through the Model Context Protocol.</sub><br><br>
+    </td>
+    <td align="center" width="25%">
+      <br>🧠<br><br><b>Multi-LLM Freedom</b><br>
+      <sub>Bring your own model — local or hosted, your choice.</sub><br><br>
+    </td>
+  </tr>
+</table>
+
+---
+
+## 🧩 The iMBrace platform
+
+A suite of focused products working as one governed system:
+
+| | Product | What it does |
+|:--:|---|---|
+| 💬 | **CommsIQ** | Omnichannel conversations across every customer touchpoint |
+| 📄 | **DocIQ** | Document intelligence, extraction, and understanding |
+| 📊 | **InsightsIQ** | Data boards and dynamic business intelligence |
+| 🔀 | **FlowOps** | DAG-based workflow automation |
+| 🧠 | **OntoCore** | The knowledge and ontology core |
+| 🛡️ | **GovernCore** | Governance, security, and access control |
 
 ---
 
@@ -110,12 +185,12 @@ the printed key id/secret into `.env` as `GARAGE_KEY_ID` / `GARAGE_KEY_SECRET`.
 
 ## License — please read first
 
-IMbrace source is **dual-licensed**, split by file path:
+iMBrace source is **dual-licensed**, split by file path:
 
 | If a file path… | It is licensed under | Meaning |
 |---|---|---|
 | does **NOT** contain `.ee.` (the vast majority of the code) | [**Sustainable Use License v1.0**](LICENSE.md) | Source-available. You may use, copy, and modify it, subject to the usage limits in the license (e.g. no reselling it as a competing product). |
-| **DOES** contain `.ee.` in its path (e.g. `x.ee.ts`, `packages/ee/…`) | [**Enterprise License**](LICENSE_EE.md) | Commercial feature. A paid IMbrace license is required to use it in production. |
+| **DOES** contain `.ee.` in its path (e.g. `x.ee.ts`, `packages/ee/…`) | [**Enterprise License**](LICENSE_EE.md) | Commercial feature. A paid iMBrace license is required to use it in production. |
 
 This is **not** an MIT/Apache project — check which of the two applies before you use or
 contribute to a given file. See [CONTRIBUTING.md](CONTRIBUTING.md#license-boundary) for
