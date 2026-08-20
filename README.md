@@ -16,7 +16,6 @@
   <a href="LICENSE.md"><img alt="License: Sustainable Use v1.0" src="https://img.shields.io/badge/License-Sustainable%20Use%20v1.0-1a73e8?style=flat"></a>
   <img alt="Deploy: Docker Compose" src="https://img.shields.io/badge/Deploy-Docker%20Compose-1a73e8?style=flat&logo=docker&logoColor=white">
   <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-1a73e8?style=flat"></a>
-  <img alt="Stars" src="https://img.shields.io/github/stars/imbraceltd/iMBrace?style=flat&color=1a73e8&label=stars">
 </p>
 
 <p align="center">
@@ -76,11 +75,11 @@ A suite of focused products working as one governed system:
 
 | | Product | What it does |
 |:--:|---|---|
-| 💬 | **CommsIQ** | Omnichannel conversations across every customer touchpoint |
-| 📄 | **DocIQ** | Document intelligence, extraction, and understanding |
-| 📊 | **InsightsIQ** | Data boards and dynamic business intelligence |
-| 🔀 | **FlowOps** | DAG-based workflow automation |
-| 🧠 | **OntoCore** | The knowledge and ontology core |
+| 💬 | **CommsIQ** | Centralize every communication channel into one platform |
+| 📄 | **DocIQ** | Document AI — intelligent document processing |
+| 📊 | **InsightsIQ** | Data boards and business intelligence |
+| 🔀 | **FlowOps** | Automate work with pre-built workflows and templates |
+| 🧠 | **OntoCore** | Dynamic data management |
 | 🛡️ | **GovernCore** | Governance, security, and access control |
 
 ---
