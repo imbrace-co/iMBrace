@@ -36,8 +36,8 @@
 > external data sharing.**
 
 Designed to help teams transform fragmented knowledge into trusted insights, intelligent
-workflows, and practical action. **Community Edition** gives developers, startups, researchers,
-and technology teams a transparent foundation for building context-aware AI solutions using
+workflows, and practical action. **Community Edition** provides developers, startups, researchers,
+and technology teams with a transparent foundation for building context-aware AI solutions using
 their preferred models, data, and tools. Connect your knowledge, build AI agents, and automate
 repeatable processes from day one.
 
