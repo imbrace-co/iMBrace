@@ -41,6 +41,10 @@ and technology teams a transparent foundation for building context-aware AI solu
 their preferred models, data, and tools. Connect your knowledge, build AI agents, and automate
 repeatable processes from day one.
 
+<p align="center">
+  <img alt="iMBrace overview" src="imbrace-overview.png" width="100%">
+</p>
+
 ---
 
 ## Key capabilities
