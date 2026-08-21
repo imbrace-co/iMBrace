@@ -1,36 +1,37 @@
 <p align="center">
   <a href="https://www.imbrace.co">
-    <img alt="iMBrace – Open-Source Enterprise AI Operating System" src="imbrace-banner.png" width="100%">
+    <img alt="iMBrace — Open-Source Enterprise AI OS" src="imbrace-banner.png" width="100%">
   </a>
 </p>
 
-<h1 align="center">iMBrace – Open-Source Enterprise AI Operating System</h1>
+<h1 align="center">iMBrace — Open-Source Enterprise AI OS</h1>
 
-Designed to help teams transform fragmented knowledge into trusted insights, intelligent
-workflows, and practical action. Community Edition provides developers, startups, researchers,
-and technology teams with a transparent foundation for building context-aware AI solutions using
-their preferred models, data, and tools. Connect your knowledge, build AI agents, and automate
-repeatable processes from day one.
+iMBrace Community Edition is a self-hosted, open-source AI Operating System built to keep your
+company's intellectual property strictly on your infrastructure.
+
+It gives developers and technical teams a transparent foundation to deploy context-aware AI
+agents, stateful DAG workflows, and native MCP tool integrations—without sending sensitive
+enterprise data to third-party clouds. Connect your local knowledge bases, route private LLMs,
+and automate complex processes with 100% data sovereignty from day one.
 
 <p align="center">
-  <img alt="iMBrace overview" src="imbrace-overview.png" width="100%">
+  <img alt="Open MCP · Local Tools · Connected Systems" src="imbrace-hero.png" width="100%">
 </p>
 
 ---
 
 ## Key capabilities
 
-- **Enterprise Knowledge & Document Intelligence (DocIQ)** — Ingest, explore, and organize
-  documents through Knowledge Drive and Knowledge Board, providing grounded context and visible
-  insights through Databoards.
-- **AI Agents & Insights (InsightIQ)** — Build context-aware AI agents that answer questions,
-  analyze information, and turn enterprise knowledge into practical insights.
-- **Workflow & Communication Automation (FlowOps & CommsIQ)** — Build repeatable workflows,
-  scheduled events, and AI-powered conversations across communication channels.
-- **Model Flexibility & MCP Support** — Work with multiple LLM providers and extend platform
-  capabilities through Model Context Protocol (MCP) connections.
-- **Seamless Self-Hosting** — Deploy iMBrace Community Edition in your own environment and
-  maintain control over your deployment.
+- **Data Sovereignty & Local Context** — Ingest unstructured data into local vector stores. Your
+  intellectual property stays behind your firewall.
+- **AI Agent Builder** — Deploy role-based agents powered by local LLMs (Ollama/vLLM) or private
+  API endpoints with complete prompt transparency.
+- **Stateful DAG Workflow Engine** — Orchestrate multi-step AI tasks, scheduled triggers, and
+  communication webhooks over predictable execution paths.
+- **Native MCP Gateway** — Expose internal tools, databases, and custom Python/Node scripts to
+  agents using open Model Context Protocol standards.
+- **Local System Telemetry** — Track execution paths, token consumption, and node latency in
+  real-time. Export logs to Grafana/Prometheus.
 - **Enterprise-Scale AI** — Scale beyond Community Edition with hybrid RAG and SQL, agent
   orchestration, enterprise access control, governance and auditability, multi-organization
   management, AI Copilot, and professional support.
