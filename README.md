@@ -20,19 +20,19 @@ and automate complex processes with 100% data sovereignty from day one.
 
 ---
 
-## Key capabilities
+## Key Capabilities
 
-- **Data Sovereignty & Local Context** — Ingest unstructured data into local vector stores. Your
+- **Data Sovereignty & Local Context:** Ingest unstructured data into local vector stores. Your
   intellectual property stays behind your firewall.
-- **AI Agent Builder** — Deploy role-based agents powered by local LLMs (Ollama/vLLM) or private
+- **AI Agent Builder:** Deploy role-based agents powered by local LLMs (Ollama/vLLM) or private
   API endpoints with complete prompt transparency.
-- **Stateful DAG Workflow Engine** — Orchestrate multi-step AI tasks, scheduled triggers, and
+- **Stateful DAG Workflow Engine:** Orchestrate multi-step AI tasks, scheduled triggers, and
   communication webhooks over predictable execution paths.
-- **Native MCP Gateway** — Expose internal tools, databases, and custom Python/Node scripts to
+- **Native MCP Gateway:** Expose internal tools, databases, and custom Python/Node scripts to
   agents using open Model Context Protocol standards.
-- **Local System Telemetry** — Track execution paths, token consumption, and node latency in
+- **Local System Telemetry:** Track execution paths, token consumption, and node latency in
   real-time. Export logs to Grafana/Prometheus.
-- **Enterprise-Scale AI** — Scale beyond Community Edition with hybrid RAG and SQL, agent
+- **Enterprise-Scale AI:** Scale beyond Community Edition with hybrid RAG and SQL, agent
   orchestration, enterprise access control, governance and auditability, multi-organization
   management, AI Copilot, and professional support.
 
