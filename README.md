@@ -1,10 +1,10 @@
 <p align="center">
   <a href="https://www.imbrace.co">
-    <img alt="iMBrace — Open-Source Enterprise AI Operating System" src="imbrace-banner.png" width="100%">
+    <img alt="iMBrace – Open-Source Enterprise AI Operating System" src="imbrace-banner.png" width="100%">
   </a>
 </p>
 
-<h1 align="center">iMBrace — Open-Source Enterprise AI Operating System</h1>
+<h1 align="center">iMBrace – Open-Source Enterprise AI Operating System</h1>
 
 <p align="center">
   <b>Transform fragmented knowledge into trusted insights, intelligent workflows, and practical action.</b>
