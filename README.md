@@ -6,37 +6,8 @@
 
 <h1 align="center">iMBrace – Open-Source Enterprise AI Operating System</h1>
 
-<p align="center">
-  <b>Transform fragmented knowledge into trusted insights, intelligent workflows, and practical action.</b>
-</p>
-
-<p align="center">
-  <a href="LICENSE.md"><img alt="License: Sustainable Use v1.0" src="https://img.shields.io/badge/License-Sustainable%20Use%20v1.0-1a73e8?style=flat"></a>
-  <img alt="Deploy: Docker Compose" src="https://img.shields.io/badge/Deploy-Docker%20Compose-1a73e8?style=flat&logo=docker&logoColor=white">
-  <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-1a73e8?style=flat"></a>
-</p>
-
-<p align="center">
-  <a href="https://www.imbrace.co"><b>Website</b></a>
-  &nbsp;·&nbsp;
-  <a href="#quick-start--run-imbrace-with-docker-compose">Quick start</a>
-  &nbsp;·&nbsp;
-  <a href="#key-capabilities">Key capabilities</a>
-  &nbsp;·&nbsp;
-  <a href="#repositories">Repositories</a>
-  &nbsp;·&nbsp;
-  <a href="#license--please-read-first">License</a>
-</p>
-
-<br>
-
-> [!NOTE]
-> **iMBrace Community Edition is now open source.** Build context-aware AI on your own
-> infrastructure — with your knowledge, models, data, and tools. **100% self-hosted, zero
-> external data sharing.**
-
 Designed to help teams transform fragmented knowledge into trusted insights, intelligent
-workflows, and practical action. **Community Edition** provides developers, startups, researchers,
+workflows, and practical action. Community Edition provides developers, startups, researchers,
 and technology teams with a transparent foundation for building context-aware AI solutions using
 their preferred models, data, and tools. Connect your knowledge, build AI agents, and automate
 repeatable processes from day one.
