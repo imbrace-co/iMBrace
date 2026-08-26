@@ -157,7 +157,6 @@ what this means for contributors.
 | Repo | Description | Stack |
 |---|---|---|
 | [imbrace-fe](https://github.com/imbraceltd/imbrace-fe) | Main webapp — admin / member workspace | Vite · React 18 · Redux Toolkit · PWA |
-| [imbrace-ui](https://github.com/imbraceltd/imbrace-ui) | Shared UI component library (`@imbrace/ui`) | React · Storybook · Rollup |
 | [imbrace-chat-widget](https://github.com/imbraceltd/imbrace-chat-widget) | Embeddable chat widget (`<script>` drop-in) | Vite · React |
 | [imbrace-ai-chatbot](https://github.com/imbraceltd/imbrace-ai-chatbot) | AI chatbot single-page app | Vite · React 19 · AI SDK |
 
@@ -173,7 +172,6 @@ what this means for contributors.
 | [data_board](https://github.com/imbraceltd/data_board) | Data-board management — data / CRM / knowledge / document boards | Hono · Drizzle · PostgreSQL |
 | [file](https://github.com/imbraceltd/file) | File service — upload, storage, presigned URLs | Hono · TypeScript |
 | [marketplace](https://github.com/imbraceltd/marketplace) | Apps / templates / integrations hub | Node · TypeScript |
-| [auth](https://github.com/imbraceltd/auth) | Self-hosted authentication server (OpenAuth-based) | Node · TypeScript |
 
 ### Workflow
 | Repo | Description | Stack |

@@ -1,9 +1,6 @@
 [submodule "imbrace-fe"]
 	path = imbrace-fe
 	url = https://github.com/imbraceltd/imbrace-fe.git
-[submodule "imbrace-ui"]
-	path = imbrace-ui
-	url = https://github.com/imbraceltd/imbrace-ui.git
 [submodule "imbrace-chat-widget"]
 	path = imbrace-chat-widget
 	url = https://github.com/imbraceltd/imbrace-chat-widget.git
@@ -34,9 +31,6 @@
 [submodule "marketplace"]
 	path = marketplace
 	url = https://github.com/imbraceltd/marketplace.git
-[submodule "auth"]
-	path = auth
-	url = https://github.com/imbraceltd/auth.git
 [submodule "workflow"]
 	path = workflow
 	url = https://github.com/imbraceltd/workflow.git
