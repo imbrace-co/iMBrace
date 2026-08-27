@@ -4,9 +4,6 @@
 [submodule "imbrace-chat-widget"]
 	path = imbrace-chat-widget
 	url = https://github.com/imbrace-co/imbrace-chat-widget.git
-[submodule "imbrace-ai-chatbot"]
-	path = imbrace-ai-chatbot
-	url = https://github.com/imbrace-co/imbrace-ai-chatbot.git
 [submodule "platform"]
 	path = platform
 	url = https://github.com/imbrace-co/platform.git

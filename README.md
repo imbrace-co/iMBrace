@@ -158,7 +158,6 @@ what this means for contributors.
 |---|---|---|
 | [imbrace-fe](https://github.com/imbrace-co/imbrace-fe) | Main webapp — admin / member workspace | Vite · React 18 · Redux Toolkit · PWA |
 | [imbrace-chat-widget](https://github.com/imbrace-co/imbrace-chat-widget) | Embeddable chat widget (`<script>` drop-in) | Vite · React |
-| [imbrace-ai-chatbot](https://github.com/imbrace-co/imbrace-ai-chatbot) | AI chatbot single-page app | Vite · React 19 · AI SDK |
 
 
 ### Backend services
