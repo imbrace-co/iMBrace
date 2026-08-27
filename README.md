@@ -44,7 +44,7 @@ The whole stack runs from one file: [`deploy/docker-compose.yml`](deploy/docker-
 Every sidecar config (nginx, Garage, Postgres init, Loki/Alloy/Prometheus/Grafana) is
 inlined as a Compose `config`, so that single file *is* the deployment — 21 long-running
 containers plus 10 one-shot DB init/migrate jobs, from 27 images. All images are public
-(`docker.io/imbraceltd`), so no registry token is required.
+(`docker.io/imbraceco`), so no registry token is required.
 
 ### Requirements
 

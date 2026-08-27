@@ -6,7 +6,7 @@
 # (nginx, garage.toml, postgres initdb, loki/alloy/prometheus/grafana) is
 # inlined as a compose `config`, so no companion files are needed.
 #
-# Images come from the public docker.io/imbraceltd registry (no pull secret).
+# Images come from the public docker.io/imbraceco registry (no pull secret).
 #
 # REQUIREMENTS: Docker Engine 24+ and Docker Compose v2.23.1+
 #               (inline `configs[].content` support).
@@ -353,7 +353,7 @@ services:
         echo "[init] done"
 
   platform-service:
-    image: docker.io/imbraceltd/imbrace-platform:v0.0.3-3453eb3
+    image: docker.io/imbraceco/imbrace-platform:v0.0.3-3453eb3
     container_name: imbrace-svc-platform-service
     restart: unless-stopped
     depends_on:
@@ -424,7 +424,7 @@ services:
         echo "[init] done"
 
   file-service:
-    image: docker.io/imbraceltd/file:v0.0.4-6c2ede1
+    image: docker.io/imbraceco/file:v0.0.4-6c2ede1
     container_name: imbrace-svc-file-service
     restart: unless-stopped
     depends_on:
@@ -489,7 +489,7 @@ services:
         echo "[init] done"
 
   channel-service:
-    image: docker.io/imbraceltd/channel:v0.0.25-d32bd89
+    image: docker.io/imbraceco/channel:v0.0.25-d32bd89
     container_name: imbrace-svc-channel-service
     restart: unless-stopped
     depends_on:
@@ -615,7 +615,7 @@ services:
         echo "[init] done"
 
   data-board:
-    image: docker.io/imbraceltd/data_board:v0.0.5-67b903e
+    image: docker.io/imbraceco/data_board:v0.0.5-67b903e
     container_name: imbrace-svc-data-board
     restart: unless-stopped
     depends_on:
@@ -719,7 +719,7 @@ services:
         echo "[init] done"
 
   marketplace:
-    image: docker.io/imbraceltd/marketplace:v0.0.9-f0966c8
+    image: docker.io/imbraceco/marketplace:v0.0.9-f0966c8
     container_name: imbrace-svc-marketplace
     restart: unless-stopped
     depends_on:
@@ -808,7 +808,7 @@ services:
         echo "[init] done"
 
   chat-ai:
-    image: docker.io/imbraceltd/chat-ai:v0.0.2-f31753f
+    image: docker.io/imbraceco/chat-ai:v0.0.2-f31753f
     container_name: imbrace-svc-chat-ai
     restart: unless-stopped
     depends_on:
@@ -952,7 +952,7 @@ services:
         echo "[init] done"
 
   ai-agent-db-migrate:
-    image: docker.io/imbraceltd/ai-agent:v0.0.5-0aaf9aa
+    image: docker.io/imbraceco/ai-agent:v0.0.5-0aaf9aa
     restart: "no"
     depends_on:
       ai-agent-db-init:
@@ -962,7 +962,7 @@ services:
     networks: [imbrace-net]
 
   ai-agent:
-    image: docker.io/imbraceltd/ai-agent:v0.0.5-0aaf9aa
+    image: docker.io/imbraceco/ai-agent:v0.0.5-0aaf9aa
     container_name: imbrace-svc-ai-agent
     restart: unless-stopped
     depends_on:
@@ -1024,7 +1024,7 @@ services:
         echo "[init] done"
 
   apworkflow-db-migrate:
-    image: docker.io/imbraceltd/apwf:dev-be-93efe14
+    image: docker.io/imbraceco/apwf:dev-be-93efe14
     restart: "no"
     depends_on:
       apworkflow-db-init:
@@ -1041,7 +1041,7 @@ services:
     networks: [imbrace-net]
 
   apworkflow-api:
-    image: docker.io/imbraceltd/apwf:dev-be-93efe14
+    image: docker.io/imbraceco/apwf:dev-be-93efe14
     container_name: imbrace-svc-apworkflow-api
     restart: unless-stopped
     depends_on:
@@ -1126,7 +1126,7 @@ services:
           - imbrace-svc-apworkflow-api.imbrace-services
 
   apworkflow-app:
-    image: docker.io/imbraceltd/apwf:dev-fe-3da8b95
+    image: docker.io/imbraceco/apwf:dev-fe-3da8b95
     container_name: imbrace-svc-apworkflow-app
     restart: unless-stopped
     environment:
@@ -1151,7 +1151,7 @@ services:
           - imbrace-svc-apworkflow-app.imbrace-services
 
   apworkflow-worker:
-    image: docker.io/imbraceltd/apwf:dev-engine-9f677c6
+    image: docker.io/imbraceco/apwf:dev-engine-9f677c6
     container_name: imbrace-svc-apworkflow-worker
     restart: unless-stopped
     depends_on:
@@ -1250,7 +1250,7 @@ services:
   # ===========================================================================
 
   app-gateway:
-    image: docker.io/imbraceltd/app-gateway:v0.0.10-319d3a1
+    image: docker.io/imbraceco/app-gateway:v0.0.10-319d3a1
     container_name: imbrace-svc-app-gateway
     restart: unless-stopped
     # The gateway wires its upstreams at startup (chart frontendRedeploy hook
@@ -1323,7 +1323,7 @@ services:
   # VARS (the OSS image writes its own env.json at startup). Served publicly at
   # <PUBLIC_HOST>:6868/ via the edge proxy.
   imbrace-fe:
-    image: docker.io/imbraceltd/imbrace-fe:v0.0.15-f012f20
+    image: docker.io/imbraceco/imbrace-fe:v0.0.15-f012f20
     container_name: imbrace-svc-imbrace-fe
     restart: unless-stopped
     depends_on:
@@ -1357,7 +1357,7 @@ services:
   # NodePort) so the dashboard's VITE_APP_INTERNAL_AI_CHAT_HOST is reachable
   # from the browser.
   insightiq:
-    image: docker.io/imbraceltd/imbrace-ai-chatbot:v0.0.2-b860d6b
+    image: docker.io/imbraceco/imbrace-ai-chatbot:v0.0.2-b860d6b
     container_name: imbrace-svc-insightiq
     restart: unless-stopped
     depends_on:
@@ -1382,7 +1382,7 @@ services:
   # /usr/share/nginx/html/env, then runs /generate-env-json.sh (ECS task-def
   # parity). Published on host :30050 (chart NodePort).
   chat-widget:
-    image: docker.io/imbraceltd/imbrace-chat-widget:v0.0.5-e310c76
+    image: docker.io/imbraceco/imbrace-chat-widget:v0.0.5-e310c76
     container_name: imbrace-svc-chat-widget
     restart: unless-stopped
     depends_on:
