@@ -64,7 +64,7 @@ Nothing enforces these numbers; below them the stack starts but runs degraded.
 
 ```bash
 # grab just the one file — no clone, no submodules
-curl -fsSLO https://raw.githubusercontent.com/imbraceltd/imbrace/main/deploy/docker-compose.yml
+curl -fsSLO https://raw.githubusercontent.com/imbrace-co/imbrace/main/deploy/docker-compose.yml
 
 # start everything (defaults to localhost)
 docker compose up -d
@@ -156,27 +156,27 @@ what this means for contributors.
 ### Frontend
 | Repo | Description | Stack |
 |---|---|---|
-| [imbrace-fe](https://github.com/imbraceltd/imbrace-fe) | Main webapp — admin / member workspace | Vite · React 18 · Redux Toolkit · PWA |
-| [imbrace-chat-widget](https://github.com/imbraceltd/imbrace-chat-widget) | Embeddable chat widget (`<script>` drop-in) | Vite · React |
-| [imbrace-ai-chatbot](https://github.com/imbraceltd/imbrace-ai-chatbot) | AI chatbot single-page app | Vite · React 19 · AI SDK |
+| [imbrace-fe](https://github.com/imbrace-co/imbrace-fe) | Main webapp — admin / member workspace | Vite · React 18 · Redux Toolkit · PWA |
+| [imbrace-chat-widget](https://github.com/imbrace-co/imbrace-chat-widget) | Embeddable chat widget (`<script>` drop-in) | Vite · React |
+| [imbrace-ai-chatbot](https://github.com/imbrace-co/imbrace-ai-chatbot) | AI chatbot single-page app | Vite · React 19 · AI SDK |
 
 
 ### Backend services
 | Repo | Description | Stack |
 |---|---|---|
-| [platform](https://github.com/imbraceltd/platform) | Core platform — authentication, organizations, users, teams, SSO, licensing | Hono · Drizzle · PostgreSQL |
-| [app-gateway](https://github.com/imbraceltd/app-gateway) | Self-hostable API gateway — auth, license verification, routing | Node · Express · TypeScript |
-| [ai-agent](https://github.com/imbraceltd/ai-agent) | AI agent runtime (backend + web client) — tools, MCP, chat orchestration | Express · React · TypeScript |
-| [chat-ai](https://github.com/imbraceltd/chat-ai) | AI chat service — runs OpenAPI/MCP tool-servers | Open WebUI-based |
-| [channel](https://github.com/imbraceltd/channel) | Omnichannel service — channels, conversations, contacts, webhooks, WebSocket | Hono · TypeScript |
-| [data_board](https://github.com/imbraceltd/data_board) | Data-board management — data / CRM / knowledge / document boards | Hono · Drizzle · PostgreSQL |
-| [file](https://github.com/imbraceltd/file) | File service — upload, storage, presigned URLs | Hono · TypeScript |
-| [marketplace](https://github.com/imbraceltd/marketplace) | Apps / templates / integrations hub | Node · TypeScript |
+| [platform](https://github.com/imbrace-co/platform) | Core platform — authentication, organizations, users, teams, SSO, licensing | Hono · Drizzle · PostgreSQL |
+| [app-gateway](https://github.com/imbrace-co/app-gateway) | Self-hostable API gateway — auth, license verification, routing | Node · Express · TypeScript |
+| [ai-agent](https://github.com/imbrace-co/ai-agent) | AI agent runtime (backend + web client) — tools, MCP, chat orchestration | Express · React · TypeScript |
+| [chat-ai](https://github.com/imbrace-co/chat-ai) | AI chat service — runs OpenAPI/MCP tool-servers | Open WebUI-based |
+| [channel](https://github.com/imbrace-co/channel) | Omnichannel service — channels, conversations, contacts, webhooks, WebSocket | Hono · TypeScript |
+| [data_board](https://github.com/imbrace-co/data_board) | Data-board management — data / CRM / knowledge / document boards | Hono · Drizzle · PostgreSQL |
+| [file](https://github.com/imbrace-co/file) | File service — upload, storage, presigned URLs | Hono · TypeScript |
+| [marketplace](https://github.com/imbrace-co/marketplace) | Apps / templates / integrations hub | Node · TypeScript |
 
 ### Workflow
 | Repo | Description | Stack |
 |---|---|---|
-| [workflow](https://github.com/imbraceltd/workflow) | Workflow automation engine | TypeScript · React |
+| [workflow](https://github.com/imbrace-co/workflow) | Workflow automation engine | TypeScript · React |
 
 ---
 

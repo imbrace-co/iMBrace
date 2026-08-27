@@ -1,36 +1,36 @@
 [submodule "imbrace-fe"]
 	path = imbrace-fe
-	url = https://github.com/imbraceltd/imbrace-fe.git
+	url = https://github.com/imbrace-co/imbrace-fe.git
 [submodule "imbrace-chat-widget"]
 	path = imbrace-chat-widget
-	url = https://github.com/imbraceltd/imbrace-chat-widget.git
+	url = https://github.com/imbrace-co/imbrace-chat-widget.git
 [submodule "imbrace-ai-chatbot"]
 	path = imbrace-ai-chatbot
-	url = https://github.com/imbraceltd/imbrace-ai-chatbot.git
+	url = https://github.com/imbrace-co/imbrace-ai-chatbot.git
 [submodule "platform"]
 	path = platform
-	url = https://github.com/imbraceltd/platform.git
+	url = https://github.com/imbrace-co/platform.git
 [submodule "app-gateway"]
 	path = app-gateway
-	url = https://github.com/imbraceltd/app-gateway.git
+	url = https://github.com/imbrace-co/app-gateway.git
 [submodule "ai-agent"]
 	path = ai-agent
-	url = https://github.com/imbraceltd/ai-agent.git
+	url = https://github.com/imbrace-co/ai-agent.git
 [submodule "chat-ai"]
 	path = chat-ai
-	url = https://github.com/imbraceltd/chat-ai.git
+	url = https://github.com/imbrace-co/chat-ai.git
 [submodule "channel"]
 	path = channel
-	url = https://github.com/imbraceltd/channel.git
+	url = https://github.com/imbrace-co/channel.git
 [submodule "data_board"]
 	path = data_board
-	url = https://github.com/imbraceltd/data_board.git
+	url = https://github.com/imbrace-co/data_board.git
 [submodule "file"]
 	path = file
-	url = https://github.com/imbraceltd/file.git
+	url = https://github.com/imbrace-co/file.git
 [submodule "marketplace"]
 	path = marketplace
-	url = https://github.com/imbraceltd/marketplace.git
+	url = https://github.com/imbrace-co/marketplace.git
 [submodule "workflow"]
 	path = workflow
-	url = https://github.com/imbraceltd/workflow.git
+	url = https://github.com/imbrace-co/workflow.git
