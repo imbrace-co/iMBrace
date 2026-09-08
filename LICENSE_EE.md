@@ -1,15 +1,15 @@
-imbrace Enterprise License
+iMBrace Enterprise License
 
-Copyright (c) 2024-present imbrace, Inc.
+Copyright (c) 2024-present iMBrace Limited
 
 This license applies to all files in this repository that contain ".ee."
-in their file path. All other files are licensed under the imbrace
+in their file path. All other files are licensed under the iMBrace
 Sustainable Use License (see LICENSE.md).
 
 Grant of License
 
-Subject to the terms of a valid imbrace Enterprise Subscription Agreement,
-imbrace grants you a limited, non-exclusive, non-transferable,
+Subject to the terms of a valid iMBrace Enterprise Subscription Agreement,
+iMBrace grants you a limited, non-exclusive, non-transferable,
 non-sublicensable license to use and run the Software in production.
 
 Development and Testing Exception
@@ -28,7 +28,7 @@ You may not:
 
 Ownership
 
-imbrace retains all right, title, and interest in and to the Software,
+iMBrace retains all right, title, and interest in and to the Software,
 including all intellectual property rights. No title to or ownership of
 the Software is transferred to you.
 

@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-If you believe you have found a security vulnerability in any IMbrace repository, please
+If you believe you have found a security vulnerability in any iMBrace repository, please
 report it **privately**. Do **not** open a public issue, discussion, or pull request.
 
 Email **security@imbrace.co** with:
@@ -14,4 +14,4 @@ Email **security@imbrace.co** with:
 We will acknowledge your report, investigate, and keep you informed of the resolution.
 Please give us a reasonable time to fix the issue before any public disclosure.
 
-Thank you for helping keep IMbrace and its users safe.
+Thank you for helping keep iMBrace and its users safe.

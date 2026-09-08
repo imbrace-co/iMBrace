@@ -1,6 +1,6 @@
-# Contributing to IMbrace
+# Contributing to iMBrace
 
-Thanks for your interest in improving IMbrace! This guide applies across all IMbrace
+Thanks for your interest in improving iMBrace! This guide applies across all iMBrace
 open-source repositories (see the [README](README.md#repositories) for the full list).
 
 ## Before you start
@@ -12,7 +12,7 @@ open-source repositories (see the [README](README.md#repositories) for the full 
 
 ## License boundary — important
 
-IMbrace is **dual-licensed** by file path (see the [README](README.md#license--please-read-first)):
+iMBrace is **dual-licensed** by file path (see the [README](README.md#license--please-read-first)):
 
 - Files whose path does **not** contain `.ee.` → [Sustainable Use License v1.0](LICENSE.md).
 - Files whose path **does** contain `.ee.` (e.g. `x.ee.ts`, `packages/ee/…`) →

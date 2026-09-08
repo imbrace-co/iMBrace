@@ -1,10 +1,10 @@
-imbrace Sustainable Use License v1.0
+iMBrace Sustainable Use License v1.0
 
-Copyright (c) 2024-present imbrace, Inc.
+Copyright (c) 2024-present iMBrace Limited
 
 Notice: All files in this repository that do not contain ".ee." in their
 file path are licensed under this Sustainable Use License. Files containing
-".ee." in their file path are subject to the imbrace Enterprise License
+".ee." in their file path are subject to the iMBrace Enterprise License
 found in LICENSE_EE.md. Content of branches other than the main branch
 is not licensed.
 
