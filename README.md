@@ -50,19 +50,24 @@ so no registry token is required.
 
 ### Requirements
 
-Docker Engine 24+ and **Docker Compose v2.23.1+** (for inline `configs[].content`), on a
-host sized for the workload:
+Docker Engine 24+ and **Docker Compose v2.23.1+** (for inline `configs[].content`) on a
+single Linux host, sized for a production workload:
 
-| | Minimum | Recommended | Notes |
-|---|---|---|---|
-| CPU | 4 cores | 8 cores | `amd64` or `arm64`. Idle sits at ~1–2 cores; the peak is boot — 10 sequential init/migrate jobs, the Activepieces `nx` migration, and the pgvector index build. On 4 cores expect boot to take several minutes. |
-| RAM | 12 GB | 16 GB | ~7.5 GB idle, ~14.5 GB under load. Largest consumers: `apworkflow-api` (`WORKER_AND_APP`) + `apworkflow-worker` (dev-mode pieces) ≈ 2–5 GB, Kafka at `-Xmx1g` ≈ 1.5 GB, `chat-ai` ≈ 1–1.5 GB. |
-| Free disk on `/` | 25 GB | 40 GB | 11–16 GB of images (the three `apwf` tags share no layers, and both `postgres:18-alpine` and `pgvector/pgvector:pg18` are pulled) plus volumes that keep growing: Kafka retains 7 days of log, `worker-cache` grows per built piece, `pgdata` carries the pgvector embeddings. |
-| GPU | not used | — | No GPU service ships in this file. The AI features expect an **external** OpenAI-compatible endpoint — see `VLLM_URL` / `LLM_PROVIDER` on `chat-ai` and `ai-agent`. |
+| | Production | Notes |
+|---|---|---|
+| CPU | 8 cores (16 from ~50 concurrent users) | `amd64` or `arm64`. Steady state sits at ~1–2 cores; the peak is boot — 10 sequential init/migrate jobs, the Activepieces `nx` migration, and the pgvector index build. Workflow and RAG bursts are what consume the remaining headroom. |
+| RAM | 24 GB | ~7.5 GB at rest, ~14.5 GB under load, so 24 GB leaves room for concurrency spikes without OOM-kills. Largest consumers: `apworkflow-api` (`WORKER_AND_APP`) + `apworkflow-worker` ≈ 2–5 GB, Kafka at `-Xmx1g` ≈ 1.5 GB, `chat-ai` ≈ 1–1.5 GB. |
+| Disk | 100 GB SSD (NVMe preferred) | 11–16 GB of images (the three `apwf` tags share no layers, and both `postgres:18-alpine` and `pgvector/pgvector:pg18` are pulled); the rest is volumes that keep growing — Kafka retains 7 days of log, `worker-cache` grows per built piece, `pgdata` carries the pgvector embeddings. Postgres and pgvector are latency-sensitive, so put the Docker data root on SSD. |
+| GPU | not used | No GPU service ships in this file. The AI features expect an **external** OpenAI-compatible endpoint — see `VLLM_URL` / `LLM_PROVIDER` on `chat-ai` and `ai-agent`. |
+| Network | TLS terminator in front | Run the stack behind a reverse proxy / load balancer with your certificate and set `PUBLIC_SCHEME=https` + `WS_SCHEME=wss`. Expose only the ports you actually serve. |
 
 Nothing enforces these numbers — the file declares no `mem_limit` and no
 `deploy.resources`, so Docker will not stop you. Below them the stack still starts but runs
 degraded, and too little RAM surfaces as random OOM-kills rather than a clear error.
+
+Before going live, rotate every default credential and key (see the warning under
+[Configuration](#configuration)), and schedule backups of the `pgdata` and object-storage
+volumes — `docker compose down -v` deletes them irreversibly.
 
 ### Install
 
