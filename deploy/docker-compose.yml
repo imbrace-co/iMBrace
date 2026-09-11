@@ -3,8 +3,8 @@
 #
 # Consolidated from imbrace-deploy-oss/docker-compose-imbrace/ (which had one
 # compose file per service) into ONE self-contained file: every sidecar config
-# (nginx, garage.toml, postgres initdb, loki/alloy/prometheus/grafana) is
-# inlined as a compose `config`, so no companion files are needed.
+# (nginx, garage.toml, postgres initdb) is inlined as a compose `config`, so
+# no companion files are needed.
 #
 # Images come from the public docker.io/imbraceco registry (no pull secret).
 #
@@ -15,18 +15,12 @@
 # QUICK START
 # -----------------------------------------------------------------------------
 #   cd deploy
-#   docker compose up -d                     # everything except GPU + logging
+#   docker compose up -d
 #   docker compose ps
 #
 # Point the stack at a real host (instead of localhost) either with a .env file
 # next to this one, or inline:
 #   PUBLIC_HOST=10.0.0.5 docker compose up -d
-#
-# Optional add-ons (compose profiles):
-#   docker compose --profile logging up -d           # Loki+Alloy+Prometheus+Grafana
-#   docker compose --profile qwen up -d              # vLLM qwen  (needs NVIDIA GPU)
-#   docker compose --profile gemma4 up -d            # vLLM gemma4
-#   docker compose --profile embedding up -d         # vLLM embedding
 #
 # Stop / wipe:
 #   docker compose down                      # stop
@@ -53,7 +47,6 @@
 #   30040  ai-agent (Next Best Action)
 #   30030  insightIQ AI chat
 #   30050  chat widget
-#   36868  Grafana (admin/admin, --profile logging)
 #
 # -----------------------------------------------------------------------------
 # ONE-TIME GARAGE (S3) BOOTSTRAP — optional
@@ -77,10 +70,9 @@
 # -----------------------------------------------------------------------------
 # - Rotate: POSTGRES_PASSWORD, REDIS_PASSWORD, NEW_ORG_PASSWORD
 #   (platform-service), the AP_* JWT/encryption keys, channel-service
-#   JWT_SECRET, garage rpc_secret (config `garage-config` below), the Grafana
-#   admin password. Changing POSTGRES_PASSWORD after the first run also needs
+#   JWT_SECRET and the garage rpc_secret (config `garage-config` below).
+#   Changing POSTGRES_PASSWORD after the first run also needs
 #   an `ALTER ROLE` inside Postgres — initdb only runs once.
-# - `docling-serve:latest` and `vllm-openai:latest*` are not digest-pinned.
 # - SMTP (mailgun) ships with an empty password; fill SMTP_PASSWORD /
 #   SERVICE_MAIL_API_KEY if email egress is needed.
 # - Internal hostnames keep the Helm chart convention (imbrace-svc-*, plus an
@@ -114,6 +106,8 @@ x-ap-secrets: &ap-secrets
 x-ai-agent-env: &ai-agent-env
   NODE_ENV: "production"
   PORT: "3000"
+  # vLLM is no longer part of this stack — these must point at an external
+  # OpenAI-compatible endpoint for the AI features to work.
   VLLM_URL: "http://imbrace-svc-ai-vllm-qwen:6976/v1"
   VLLM_BASE_URL: "http://imbrace-svc-ai-vllm-qwen:6976/v1"
   LLM_PROVIDER: "vllm"
@@ -173,22 +167,6 @@ x-ai-agent-env: &ai-agent-env
   FILE_PATH: "/mnt/data/files/aiToolLoopAgent/"
   ACTIVEPIECE_URL: "http://imbrace-svc-apworkflow-api:3000"
   DATA_BOARD_URL: "http://imbrace-svc-data-board:8866"
-
-# Optional GPU model servers (profiles qwen / gemma4 / embedding).
-x-vllm: &vllm
-  restart: unless-stopped
-  ipc: host
-  environment:
-    HF_HOME: /opt/imbrace/hf_home
-  volumes:
-    - /opt/imbrace/hf_home:/opt/imbrace/hf_home
-  deploy:
-    resources:
-      reservations:
-        devices:
-          - driver: nvidia
-            count: all
-            capabilities: [gpu]
 
 services:
 
@@ -848,6 +826,8 @@ services:
       LLM_DEFAULT_PROVIDER: "vllm"
       LLM_RETRIEVER_PROVIDER: "vllm"
       LLM_EMBEDDING_PROVIDER: "vllm"
+      # vLLM is no longer part of this stack — set these to an external
+      # OpenAI-compatible endpoint (or switch LLM_PROVIDER to openai/bedrock).
       VLLM_URL: "http://imbrace-svc-ai-vllm-qwen:6976/v1"
       VLLM_MODEL: "qwen3.5-35b-a3b"
       VLLM_RETRIEVER_MODEL: "qwen3.5-35b-a3b"
@@ -881,6 +861,8 @@ services:
       RAG_EMBEDDING_TYPE: "vllm"
       RAG_BEDROCK_EMBEDDING_MODEL: "amazon.titan-embed-text-v1"
       ENABLE_DOCIQ: "true"
+      # docling-serve is no longer part of this stack — DocIQ needs an
+      # external endpoint here.
       DOCLING_SERVER_URL: "http://imbrace-svc-docling-service:5001"
       DOCIQ_DEV_API_KEY: "oss-dociq-key"
       DOCIQ_CLASSIFIER_ENGINE: "hybrid"
@@ -898,30 +880,6 @@ services:
         aliases:
           - imbrace-svc-chat-ai
           - imbrace-svc-chat-ai.imbrace-services
-
-  # ===========================================================================
-  # DOCLING SERVICE — document conversion / OCR, consumed by chat-ai's DocIQ
-  # pipeline at http://imbrace-svc-docling-service:5001. In-network only.
-  # NOTE: :latest is not reproducible — pin a digest/dated tag for prod.
-  # ===========================================================================
-
-  docling-service:
-    image: quay.io/docling-project/docling-serve:latest
-    container_name: imbrace-svc-docling-service
-    restart: unless-stopped
-    environment:
-      DOCLING_SERVE_ENABLE_UI: "true"
-      DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "true"
-      DOCLING_SERVE_MAX_SYNC_WAIT: "600"
-      DOCLING_SERVE_ENG_LOC_NUM_WORKERS: "2"
-      OMP_NUM_THREADS: "4"
-      MKL_NUM_THREADS: "4"
-      UVICORN_WORKERS: "1"
-    networks:
-      imbrace-net:
-        aliases:
-          - imbrace-svc-docling-service
-          - imbrace-svc-docling-service.imbrace-services
 
   # ===========================================================================
   # AI-AGENT — Next Best Action / aiToolLoopAgent. Uses the shared `postgres`
@@ -1303,6 +1261,8 @@ services:
       AUTH_SERVICE_URL: "http://imbrace-svc-platform-service:6040"
       # ai-agent container listens on 3000 (the k8s Service remapped 80->3000)
       MESSAGE_SUGGESTION_HOST: "http://imbrace-svc-ai-agent:3000"
+      # Prometheus is no longer part of this stack — point at an external one
+      # or leave it: app-gateway degrades to "no metrics".
       PROMETHEUS_HOST: "http://imbrace-prometheus:9090"
       RELEASE_FEED_URL: "https://imbrace-install-tool.s3.ap-east-1.amazonaws.com/oss/latest.json"
       RELEASE_CHECK_STATE_DIR: "/tmp/release-check"
@@ -1438,183 +1398,6 @@ services:
     configs:
       - source: edge-proxy-nginx
         target: /etc/nginx/nginx.conf
-    networks:
-      imbrace-net:
-
-  # ===========================================================================
-  # OPTIONAL — GPU model servers (profiles: qwen / gemma4 / embedding).
-  # Converted from the ai-vllm-qwen / ai-vllm-gemma4 / ai-vllm-embedding
-  # subcharts (all disabled by default in the chart — they need an NVIDIA GPU +
-  # models staged under /opt/imbrace/hf_home).
-  # chat-ai / ai-agent point at imbrace-svc-ai-vllm-qwen:6976 by default.
-  # ===========================================================================
-
-  ai-vllm-qwen:
-    <<: *vllm
-    profiles: [qwen]
-    image: docker.io/vllm/vllm-openai:latest-cu130
-    container_name: imbrace-svc-ai-vllm-qwen
-    command:
-      - "--model"
-      - "/opt/imbrace/hf_home/hub/models--Qwen--Qwen3.5-35B-A3B"
-      - "--trust-remote-code"
-      - "--gpu-memory-utilization"
-      - "0.6"
-      - "--max-model-len"
-      - "40960"
-      - "--max-num-seqs"
-      - "4"
-      - "--enforce-eager"
-      - "--max-num-batched-tokens"
-      - "4096"
-      - "--enable-prefix-caching"
-      - "--enable-chunked-prefill"
-      - "--reasoning-parser"
-      - "qwen3"
-      - "--enable-auto-tool-choice"
-      - "--tool-call-parser"
-      - "qwen3_coder"
-      - "--served-model-name"
-      - "qwen3.5-35b-a3b"
-      - "--host"
-      - "0.0.0.0"
-      - "--port"
-      - "6976"
-    networks:
-      imbrace-net:
-        aliases:
-          - imbrace-svc-ai-vllm-qwen
-          - imbrace-svc-ai-vllm-qwen.imbrace-services
-
-  ai-vllm-gemma4:
-    <<: *vllm
-    profiles: [gemma4]
-    image: docker.io/vllm/vllm-openai:latest-cu130
-    container_name: imbrace-svc-ai-vllm-gemma4
-    command:
-      - "--model"
-      - "/opt/imbrace/hf_home/gemma-4-26B-A4B-it"
-      - "--trust-remote-code"
-      - "--gpu-memory-utilization"
-      - "0.5"
-      - "--max-model-len"
-      - "65536"
-      - "--max-num-seqs"
-      - "4"
-      - "--max-num-batched-tokens"
-      - "4096"
-      - "--enable-prefix-caching"
-      - "--enable-chunked-prefill"
-      - "--enable-auto-tool-choice"
-      - "--tool-call-parser"
-      - "gemma4"
-      - "--served-model-name"
-      - "gemma-4-26b-a4b-it"
-      - "--host"
-      - "0.0.0.0"
-      - "--port"
-      - "6977"
-    networks:
-      imbrace-net:
-        aliases:
-          - imbrace-svc-ai-vllm-gemma4
-          - imbrace-svc-ai-vllm-gemma4.imbrace-services
-
-  ai-vllm-embedding:
-    <<: *vllm
-    profiles: [embedding]
-    image: docker.io/vllm/vllm-openai:latest
-    container_name: imbrace-svc-ai-vllm-embedding
-    # Chart serves container :8000 behind a Service on :6977 — no port
-    # remapping in docker, so vLLM listens on 6977 directly here.
-    command:
-      - "Qwen/Qwen3-Embedding-4B"
-      - "--served-model-name"
-      - "qwen3-embedding"
-      - "--host"
-      - "0.0.0.0"
-      - "--port"
-      - "6977"
-      - "--max-model-len"
-      - "4096"
-      - "--gpu-memory-utilization"
-      - "0.1"
-      - "--hf-overrides"
-      - '{"is_matryoshka":true,"matryoshka_dimensions":[32,64,128,256,512,768,1024,1536,2048,2560]}'
-    networks:
-      imbrace-net:
-        aliases:
-          - imbrace-svc-ai-vllm-embedding
-          - imbrace-svc-ai-vllm-embedding.imbrace-services
-
-  # ===========================================================================
-  # OPTIONAL — logs + metrics (profile: logging). Converted from the chart's
-  # logging-* templates (Loki + Alloy + Grafana + Prometheus). In k8s Alloy
-  # tails /var/log/pods; here it discovers Docker containers via the socket.
-  # Grafana: http://<PUBLIC_HOST>:36868 (admin/admin — rotate for prod).
-  # ===========================================================================
-
-  loki:
-    image: docker.io/grafana/loki:3.5.7
-    container_name: imbrace-loki
-    profiles: [logging]
-    restart: unless-stopped
-    command: ["-config.file=/etc/loki/loki.yaml"]
-    volumes:
-      - loki-data:/loki
-    configs:
-      - source: loki-config
-        target: /etc/loki/loki.yaml
-    networks:
-      imbrace-net:
-        aliases: [imbrace-loki]
-
-  alloy:
-    image: docker.io/grafana/alloy:v1.17.1
-    container_name: imbrace-alloy
-    profiles: [logging]
-    restart: unless-stopped
-    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - alloy-data:/var/lib/alloy/data
-    configs:
-      - source: alloy-config
-        target: /etc/alloy/config.alloy
-    networks:
-      imbrace-net:
-
-  prometheus:
-    image: docker.io/prom/prometheus:v2.53.0
-    container_name: imbrace-prometheus
-    profiles: [logging]
-    restart: unless-stopped
-    volumes:
-      - prom-data:/prometheus
-    configs:
-      - source: prometheus-config
-        target: /etc/prometheus/prometheus.yml
-    networks:
-      imbrace-net:
-        aliases:
-          - imbrace-prometheus
-          - imbrace-prometheus.imbrace-services
-
-  grafana:
-    image: docker.io/grafana/grafana:12.3.8
-    container_name: imbrace-grafana
-    profiles: [logging]
-    restart: unless-stopped
-    ports:
-      - "36868:3000"
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-    volumes:
-      - grafana-data:/var/lib/grafana
-    configs:
-      - source: grafana-datasources
-        target: /etc/grafana/provisioning/datasources/datasources.yaml
     networks:
       imbrace-net:
 
@@ -1875,112 +1658,6 @@ configs:
         }
       }
 
-  # Loki single-binary, filesystem store — parity with the chart's logging.loki
-  # (retention 168h / 7 days).
-  loki-config:
-    content: |
-      auth_enabled: false
-
-      server:
-        http_listen_port: 3100
-
-      common:
-        instance_addr: 127.0.0.1
-        path_prefix: /loki
-        storage:
-          filesystem:
-            chunks_directory: /loki/chunks
-            rules_directory: /loki/rules
-        replication_factor: 1
-        ring:
-          kvstore:
-            store: inmemory
-
-      schema_config:
-        configs:
-          - from: 2024-01-01
-            store: tsdb
-            object_store: filesystem
-            schema: v13
-            index:
-              prefix: index_
-              period: 24h
-
-      limits_config:
-        retention_period: 168h
-
-      compactor:
-        working_directory: /loki/compactor
-        retention_enabled: true
-        delete_request_store: filesystem
-
-  # Alloy — tail every Docker container's logs and push to Loki.
-  # (k8s chart tails /var/log/pods; docker equivalent = docker discovery.)
-  alloy-config:
-    content: |
-      discovery.docker "containers" {
-        host = "unix:///var/run/docker.sock"
-      }
-
-      discovery.relabel "containers" {
-        targets = discovery.docker.containers.targets
-        rule {
-          source_labels = ["__meta_docker_container_name"]
-          regex         = "/(.*)"
-          target_label  = "container"
-        }
-        rule {
-          source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
-          target_label  = "project"
-        }
-        rule {
-          source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-          target_label  = "service"
-        }
-      }
-
-      loki.source.docker "containers" {
-        host       = "unix:///var/run/docker.sock"
-        targets    = discovery.relabel.containers.output
-        forward_to = [loki.write.default.receiver]
-      }
-
-      loki.write "default" {
-        endpoint {
-          url = "http://imbrace-loki:3100/loki/api/v1/push"
-        }
-      }
-
-  # Prometheus — queried by app-gateway
-  # (PROMETHEUS_HOST=http://imbrace-prometheus:9090).
-  prometheus-config:
-    content: |
-      global:
-        scrape_interval: 30s
-
-      scrape_configs:
-        - job_name: prometheus
-          static_configs:
-            - targets: ["localhost:9090"]
-        # Add app scrape targets here if/when services expose /metrics, e.g.:
-        # - job_name: app-gateway
-        #   static_configs:
-        #     - targets: ["imbrace-svc-app-gateway:9001"]
-
-  grafana-datasources:
-    content: |
-      apiVersion: 1
-      datasources:
-        - name: Loki
-          type: loki
-          access: proxy
-          url: http://imbrace-loki:3100
-          isDefault: true
-        - name: Prometheus
-          type: prometheus
-          access: proxy
-          url: http://imbrace-prometheus:9090
-
 volumes:
   pgdata:
   redis-data:
@@ -1994,10 +1671,6 @@ volumes:
   worker-codes:
   worker-cache:
   licenses:
-  loki-data:
-  alloy-data:
-  prom-data:
-  grafana-data:
 
 networks:
   imbrace-net:

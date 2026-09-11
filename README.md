@@ -43,24 +43,26 @@ configured, send data outside your infrastructure.)
 ## Quick start — run iMBrace with Docker Compose
 
 The whole stack runs from one file: [`deploy/docker-compose.yml`](deploy/docker-compose.yml).
-Every sidecar config (nginx, Garage, Postgres init, Loki/Alloy/Prometheus/Grafana) is
-inlined as a Compose `config`, so that single file *is* the deployment — 21 long-running
-containers plus 10 one-shot DB init/migrate jobs, from 27 images. All images are public
-(`docker.io/imbraceco`), so no registry token is required.
+Every sidecar config (nginx ×2, Garage, Postgres init) is inlined as a Compose `config`, so
+that single file *is* the deployment — 20 long-running containers plus 10 one-shot DB
+init/migrate jobs, from 20 distinct images. All images are public (`docker.io/imbraceco`),
+so no registry token is required.
 
 ### Requirements
 
 Docker Engine 24+ and **Docker Compose v2.23.1+** (for inline `configs[].content`), on a
 host sized for the workload:
 
-| | Minimum | Notes |
-|---|---|---|
-| CPU | 16 cores | `amd64` or `arm64` |
-| RAM | 32 GB | 30 GB *available* if you self-host the LLM |
-| Free disk on `/` | 20 GB | |
-| GPU | optional | NVIDIA + ≥32 GB VRAM, only for the self-hosted `ai-vllm` (LLM/embedding) profiles. Without a GPU everything else runs fine — the AI features that call vLLM are the only ones that fail. |
+| | Minimum | Recommended | Notes |
+|---|---|---|---|
+| CPU | 4 cores | 8 cores | `amd64` or `arm64`. Idle sits at ~1–2 cores; the peak is boot — 10 sequential init/migrate jobs, the Activepieces `nx` migration, and the pgvector index build. On 4 cores expect boot to take several minutes. |
+| RAM | 12 GB | 16 GB | ~7.5 GB idle, ~14.5 GB under load. Largest consumers: `apworkflow-api` (`WORKER_AND_APP`) + `apworkflow-worker` (dev-mode pieces) ≈ 2–5 GB, Kafka at `-Xmx1g` ≈ 1.5 GB, `chat-ai` ≈ 1–1.5 GB. |
+| Free disk on `/` | 25 GB | 40 GB | 11–16 GB of images (the three `apwf` tags share no layers, and both `postgres:18-alpine` and `pgvector/pgvector:pg18` are pulled) plus volumes that keep growing: Kafka retains 7 days of log, `worker-cache` grows per built piece, `pgdata` carries the pgvector embeddings. |
+| GPU | not used | — | No GPU service ships in this file. The AI features expect an **external** OpenAI-compatible endpoint — see `VLLM_URL` / `LLM_PROVIDER` on `chat-ai` and `ai-agent`. |
 
-Nothing enforces these numbers; below them the stack starts but runs degraded.
+Nothing enforces these numbers — the file declares no `mem_limit` and no
+`deploy.resources`, so Docker will not stop you. Below them the stack still starts but runs
+degraded, and too little RAM surfaces as random OOM-kills rather than a clear error.
 
 ### Install
 
@@ -102,23 +104,17 @@ next to the compose file, or inline on the command line:
 | `OPENAI_API_KEY` / `TAVILY_API_KEY` | empty | Optional external providers |
 
 > ⚠️ **Before exposing the stack to a network,** change the seeded admin password
-> (`NEW_ORG_PASSWORD`), the Grafana admin password, and the JWT / encryption keys
+> (`NEW_ORG_PASSWORD`) and the JWT / encryption keys
 > (`AP_ENCRYPTION_KEY`, `AP_JWT_SECRET`, `AP_WORKER_TOKEN`, channel `JWT_SECRET`,
 > `WEBUI_SECRET_KEY`, `ENCRYPTION_SECRET_KEY`, Garage `rpc_secret`). They ship as fixed
 > defaults, which means **every** install shares them until you rotate.
 
-### Optional add-ons (Compose profiles)
+### Optional add-ons
 
-```bash
-docker compose --profile logging up -d      # Loki + Alloy + Prometheus + Grafana
-docker compose --profile qwen up -d         # self-hosted vLLM chat model
-docker compose --profile gemma4 up -d
-docker compose --profile embedding up -d    # self-hosted embedding model
-```
-
-The `qwen` / `gemma4` / `embedding` profiles need an NVIDIA GPU, the NVIDIA Container
-Toolkit, and the model weights staged under `/opt/imbrace/hf_home` (bind-mounted into the
-container). Skip them to use an external LLM instead.
+The AI features (`chat-ai`, `ai-agent`) need an OpenAI-compatible LLM endpoint, which this
+file does not ship. Point `VLLM_URL` / `VLLM_EMBEDDING_URL` at an external one, or switch
+`LLM_PROVIDER` to `openai` / `bedrock` and set the matching key. DocIQ additionally needs a
+reachable `docling-serve` in `DOCLING_SERVER_URL` — otherwise set `ENABLE_DOCIQ=false`.
 
 Object storage is optional too: services default to local disk. To use the bundled Garage
 S3 node, run the one-time bootstrap documented in the header of the compose file, then put
@@ -134,7 +130,6 @@ the printed key id/secret into `.env` as `GARAGE_KEY_ID` / `GARAGE_KEY_SECRET`.
 | `http://<PUBLIC_HOST>:30030` | insightIQ AI chat |
 | `http://<PUBLIC_HOST>:30050` | Embeddable chat widget |
 | `http://<PUBLIC_HOST>:30040` | AI agent (Next Best Action) |
-| `http://<PUBLIC_HOST>:36868` | Grafana — `admin`/`admin`, with `--profile logging` |
 
 ---
 
