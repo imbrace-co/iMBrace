@@ -10,22 +10,17 @@ open-source repositories (see the [README](README.md#repositories) for the full 
 - For anything non-trivial, **open an issue to discuss it before writing code**, so we can
   agree on the approach.
 
-## License boundary — important
+## License — important
 
-iMBrace is **dual-licensed** by file path (see the [README](README.md#license--please-read-first)):
-
-- Files whose path does **not** contain `.ee.` → [Sustainable Use License v1.0](LICENSE.md).
-- Files whose path **does** contain `.ee.` (e.g. `x.ee.ts`, `packages/ee/…`) →
-  [Enterprise License](LICENSE_EE.md).
+iMBrace is licensed under the **[MIT License](LICENSE)** (see the [README](README.md#license)).
+Repositories forked from other open-source projects retain their upstream license — check
+the `LICENSE` file in each repo before contributing.
 
 What this means for you:
 
-- **Contribute only to non-`.ee.` files.** Community contributions to Enterprise (`.ee.`)
-  code are generally **not accepted** — those are commercial features governed by a
-  separate license.
-- By submitting a contribution, you agree that your contribution to the non-`.ee.` code is
-  provided under the **Sustainable Use License v1.0**, and that you have the right to
-  submit it.
+- By submitting a contribution, you agree that your contribution is provided under the same
+  license as the repository you are contributing to (MIT for iMBrace-authored repos), and
+  that you have the right to submit it.
 - Never commit secrets, credentials, customer data, or internal infrastructure details.
   (See each repo's `REMOVED.md` for the kinds of things that were scrubbed when preparing
   the open-source releases.)

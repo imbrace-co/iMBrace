@@ -12,7 +12,9 @@ company's intellectual property strictly on your infrastructure.
 It gives developers and technical teams a transparent foundation to deploy context-aware AI
 agents, stateful DAG workflows, and native MCP tool integrations—without sending sensitive
 enterprise data to third-party clouds. Connect your local knowledge bases, route private LLMs,
-and automate complex processes with 100% data sovereignty from day one.
+and automate complex processes. When deployed with self-hosted models and storage, your data
+stays inside your own environment. (Optional external providers such as OpenAI or Tavily, if
+configured, send data outside your infrastructure.)
 
 <p align="center">
   <img alt="Open MCP · Local Tools · Connected Systems" src="imbrace-hero.png" width="100%">
@@ -136,18 +138,15 @@ the printed key id/secret into `.env` as `GARAGE_KEY_ID` / `GARAGE_KEY_SECRET`.
 
 ---
 
-## License — please read first
+## License
 
-iMBrace source is **dual-licensed**, split by file path:
+iMBrace is licensed under the **[MIT License](LICENSE)** — free to use, copy,
+modify, and distribute, including for commercial purposes.
 
-| If a file path… | It is licensed under | Meaning |
-|---|---|---|
-| does **NOT** contain `.ee.` (the vast majority of the code) | [**Sustainable Use License v1.0**](LICENSE.md) | Source-available. You may use, copy, and modify it, subject to the usage limits in the license (e.g. no reselling it as a competing product). |
-| **DOES** contain `.ee.` in its path (e.g. `x.ee.ts`, `packages/ee/…`) | [**Enterprise License**](LICENSE_EE.md) | Commercial feature. A paid iMBrace license is required to use it in production. |
-
-This is **not** an MIT/Apache project — check which of the two applies before you use or
-contribute to a given file. See [CONTRIBUTING.md](CONTRIBUTING.md#license-boundary) for
-what this means for contributors.
+Each component repository carries its own `LICENSE`. Repositories forked from
+other open-source projects retain their upstream license (e.g. Activepieces and
+OpenAuth under MIT, the chatbot under Apache-2.0, the chat workspace under
+BSD-3-Clause) — check the `LICENSE` file in each repo.
 
 ---
 
