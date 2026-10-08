@@ -55,11 +55,13 @@ Every value below ships as a fixed default, so **every install shares it until y
 | Dashboard admin login | `admin@imbrace.co` / `ChangeMe@12345` | In the UI after first login (seeded once via `NEW_ORG_PASSWORD`) |
 | Postgres superuser + `imbrace` role | `changeme-postgres-pass` | `.env` → `POSTGRES_PASSWORD` — **before the first start** (afterwards it needs an `ALTER ROLE`) |
 | Redis | `imbrace-dev-redis-pass` | `.env` → `REDIS_PASSWORD` |
-| Workflow keys | fixed hex values | compose → `AP_ENCRYPTION_KEY`, `AP_JWT_SECRET`, `AP_WORKER_TOKEN` (a JWT signed with `AP_JWT_SECRET` — regenerate it together) |
-| Channel service | fixed hex value | compose → `JWT_SECRET` |
 | chat-ai | `imbrace2026` / fixed key | compose → `ENCRYPTION_SECRET_KEY`, `WEBUI_SECRET_KEY` |
 | DocIQ API key | `oss-dociq-key` | compose → `AI_SERVICE_V2_API_KEY` |
 | Garage S3 | fixed `rpc_secret` | compose → config `garage-config` |
+
+The Workflow keys `AP_ENCRYPTION_KEY` (encrypts stored connection credentials) and
+`AP_JWT_SECRET` (signs Workflow tokens) have **no default**: `docker compose up` refuses to
+start until they are in `.env`, and `./generate-env.sh` creates a random pair per install.
 
 `docker compose down -v` deletes all data volumes irreversibly — back up `pgdata` first.
 
@@ -77,18 +79,25 @@ Every value below ships as a fixed default, so **every install shares it until y
 ```bash
 mkdir imbrace && cd imbrace
 curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/docker-compose.yml
+curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/generate-env.sh
 
 cat > .env <<EOF
 PUBLIC_HOST=10.0.0.5            # IP/domain browsers use — no scheme, no port
 POSTGRES_PASSWORD=<strong-password>
 REDIS_PASSWORD=<strong-password>
 EOF
+sh generate-env.sh              # adds random AP_ENCRYPTION_KEY / AP_JWT_SECRET to .env
 
 docker compose pull
 docker compose up -d            # first start takes ~5 min
 ```
 
-Startup order is encoded in the file, so one `up -d` is enough.
+Startup order is encoded in the file, so one `up -d` is enough. Back up `.env`: losing
+`AP_ENCRYPTION_KEY` makes stored Workflow connections unrecoverable.
+
+> **Upgrading an install made from an earlier `docker-compose.yml`?** Do not run
+> `generate-env.sh` — copy the `AP_ENCRYPTION_KEY` and `AP_JWT_SECRET` values from your old
+> file into `.env` instead, so existing connections still decrypt.
 
 ### Verify
 
