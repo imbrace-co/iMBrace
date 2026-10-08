@@ -1,0 +1,146 @@
+{
+  "displayName": "Customer request - reply router",
+  "trigger": {
+    "name": "trigger",
+    "type": "PIECE_TRIGGER",
+    "valid": true,
+    "displayName": "Customer reply received",
+    "settings": {
+      "pieceName": "@activepieces/piece-webhook",
+      "pieceVersion": "0.1.24",
+      "triggerName": "catch_webhook",
+      "input": {
+        "authType": "none",
+        "authFields": {}
+      },
+      "propertySettings": {}
+    },
+    "nextAction": {
+      "name": "resume",
+      "type": "PIECE",
+      "valid": true,
+      "displayName": "Resume the run waiting for this request_id",
+      "settings": {
+        "pieceName": "@activepieces/piece-webhook",
+        "pieceVersion": "0.1.24",
+        "actionName": "resume_waiting_run",
+        "input": {
+          "key": "{{trigger.body.request_id}}",
+          "data": "{{trigger.body}}",
+          "failIfNotFound": false
+        },
+        "propertySettings": {},
+        "errorHandlingOptions": {
+          "continueOnFailure": {
+            "value": false
+          },
+          "retryOnFailure": {
+            "value": false
+          }
+        }
+      },
+      "nextAction": {
+        "name": "found",
+        "type": "ROUTER",
+        "valid": true,
+        "displayName": "Was a run waiting?",
+        "settings": {
+          "branches": [
+            {
+              "branchName": "Resumed",
+              "branchType": "CONDITION",
+              "conditions": [
+                [
+                  {
+                    "firstValue": "{{resume.resumed}}",
+                    "operator": "BOOLEAN_IS_TRUE"
+                  }
+                ]
+              ]
+            },
+            {
+              "branchName": "Nothing waiting",
+              "branchType": "FALLBACK"
+            }
+          ],
+          "executionType": "EXECUTE_FIRST_MATCH",
+          "errorHandlingOptions": {
+            "continueOnFailure": {
+              "value": false
+            },
+            "retryOnFailure": {
+              "value": false
+            }
+          }
+        },
+        "children": [
+          {
+            "name": "accepted",
+            "type": "PIECE",
+            "valid": true,
+            "displayName": "Reply 202 accepted",
+            "settings": {
+              "pieceName": "@activepieces/piece-webhook",
+              "pieceVersion": "0.1.24",
+              "actionName": "return_response",
+              "input": {
+                "responseType": "json",
+                "respond": "stop",
+                "fields": {
+                  "status": 202,
+                  "headers": {},
+                  "body": {
+                    "status": "resumed",
+                    "request_id": "{{trigger.body.request_id}}"
+                  }
+                }
+              },
+              "propertySettings": {},
+              "errorHandlingOptions": {
+                "continueOnFailure": {
+                  "value": false
+                },
+                "retryOnFailure": {
+                  "value": false
+                }
+              }
+            }
+          },
+          {
+            "name": "not_found",
+            "type": "PIECE",
+            "valid": true,
+            "displayName": "Reply 404 no waiting request",
+            "settings": {
+              "pieceName": "@activepieces/piece-webhook",
+              "pieceVersion": "0.1.24",
+              "actionName": "return_response",
+              "input": {
+                "responseType": "json",
+                "respond": "stop",
+                "fields": {
+                  "status": 404,
+                  "headers": {},
+                  "body": {
+                    "status": "no waiting request",
+                    "request_id": "{{trigger.body.request_id}}"
+                  }
+                }
+              },
+              "propertySettings": {},
+              "errorHandlingOptions": {
+                "continueOnFailure": {
+                  "value": false
+                },
+                "retryOnFailure": {
+                  "value": false
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "schemaVersion": null
+}

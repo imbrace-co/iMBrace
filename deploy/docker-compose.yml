@@ -7,6 +7,10 @@
 # no companion files are needed.
 #
 # Images come from the public docker.io/imbraceco registry (no pull secret).
+# apwf:dev-{be,fe,engine}-6009262, app-gateway:v0.0.1-aaf628e,
+# chat-ai:v0.0.1-1acceca and ai-agent:v0.0.1-3bd81f6 carry the fixes the
+# customer-request example needs (Wait for Event / Resume Waiting Run, AI
+# connector API key, Todos, masked provider keys); all are linux/amd64 + arm64.
 #
 # REQUIREMENTS: Docker Engine 24+ and Docker Compose v2.23.1+
 #               (inline `configs[].content` support).
@@ -27,6 +31,15 @@
 #   docker compose down                      # stop
 #   docker compose down -v                   # stop + delete all data volumes
 #
+# The customer-request example (examples/customer-request) is installed on
+# first start by the examples-seed service: its two flows appear in FlowOps ->
+# Workflows, its stub endpoints listen on 127.0.0.1:30800. Add an LLM provider
+# (dashboard -> LLM Provider) and the AI agent it needs is created within 30 s.
+#   docker logs -f imbrace-examples-seed     # what the seed did / is waiting for
+#   docker compose run --rm examples-seed    # run it again
+# Try it (nothing to install on the host, works the same in cmd / PowerShell):
+#   docker compose run --rm examples request REQ-1001   # then: reply / approve / result
+#
 # -----------------------------------------------------------------------------
 # SUPPORTED .env VARIABLES
 # -----------------------------------------------------------------------------
@@ -38,10 +51,14 @@
 #   WS_SCHEME=ws                  # ws when http, wss when https
 #   POSTGRES_PASSWORD=changeme-postgres-pass
 #   REDIS_PASSWORD=imbrace-dev-redis-pass
+#   INTERNAL_SERVICE_KEY=oss-dociq-key   # ai-agent -> chat-ai, unmasked provider credentials
 #   GARAGE_KEY_ID=                # filled after the garage bootstrap below
 #   GARAGE_KEY_SECRET=
 #   OPENAI_API_KEY=
 #   TAVILY_API_KEY=
+#   SEED_EXAMPLES=true            # false: do not install the customer-request example
+#   CLASSIFIER_PROVIDER_TYPE=bedrock      # LLM provider type the example's AI agent uses
+#   CLASSIFIER_MODEL=qwen.qwen3-32b-v1:0  # model of that provider
 #
 # -----------------------------------------------------------------------------
 # PUBLISHED PORTS
@@ -51,6 +68,7 @@
 #   30040  ai-agent (Next Best Action)
 #   30030  insightIQ AI chat
 #   30050  chat widget
+#   30800  customer-request example stub (127.0.0.1 only)
 #
 # -----------------------------------------------------------------------------
 # ONE-TIME GARAGE (S3) BOOTSTRAP — optional
@@ -72,7 +90,7 @@
 # -----------------------------------------------------------------------------
 # BEFORE PRODUCTION
 # -----------------------------------------------------------------------------
-# - Rotate: POSTGRES_PASSWORD, REDIS_PASSWORD, NEW_ORG_PASSWORD
+# - Rotate: POSTGRES_PASSWORD, REDIS_PASSWORD, INTERNAL_SERVICE_KEY, NEW_ORG_PASSWORD
 #   (platform-service) and the garage rpc_secret (config `garage-config`
 #   below). The AP_* keys have no default — `up` refuses to start without them.
 #   Changing POSTGRES_PASSWORD after the first run also needs
@@ -161,7 +179,8 @@ x-ai-agent-env: &ai-agent-env
   IPS_URL: "http://imbrace-svc-ips:6666"
   AI_SERVICE_V2_INTERNAL_URL: "http://imbrace-svc-chat-ai:8080"
   DOCIQ_INGEST_ENABLED: "true"
-  AI_SERVICE_V2_API_KEY: "oss-dociq-key"
+  # Also chat-ai's INTERNAL_SERVICE_KEY: lets ai-agent read unmasked provider credentials.
+  AI_SERVICE_V2_API_KEY: "${INTERNAL_SERVICE_KEY:-oss-dociq-key}"
   KAFKA_BROKERS: "imbrace-svc-kafka:9092"
   KAFKA_CLIENT_ID: "messagesuggestion"
   KAFKA_GROUP_ID: "messagesuggestion-dociq-dev"
@@ -614,6 +633,8 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: "production"
+      # The server listens on PORT (default 8081); callers use :8866.
+      PORT: "8866"
       MONGO_URI: ""
       DB_TYPE: "postgres"
       POSTGRES_URL: "postgresql://imbrace:${POSTGRES_PASSWORD:-changeme-postgres-pass}@imbrace-svc-postgresql:5432/databoard"
@@ -798,7 +819,7 @@ services:
         echo "[init] done"
 
   chat-ai:
-    image: docker.io/imbraceco/chat-ai:v0.0.1-8116aef
+    image: docker.io/imbraceco/chat-ai:v0.0.1-1acceca
     container_name: imbrace-svc-chat-ai
     restart: unless-stopped
     depends_on:
@@ -808,6 +829,8 @@ services:
         condition: service_healthy
     environment:
       ENV: "prod"
+      # Must equal ai-agent's AI_SERVICE_V2_API_KEY; other callers get masked credentials.
+      INTERNAL_SERVICE_KEY: "${INTERNAL_SERVICE_KEY:-oss-dociq-key}"
       CHAT_AI_URL: ""
       IMBRACE_NEXT_BEST_ACTION_URL: ""
       IMBRACE_PLATFORM_HOST: "http://imbrace-svc-platform-service:6040"
@@ -922,7 +945,7 @@ services:
         echo "[init] done"
 
   ai-agent-db-migrate:
-    image: docker.io/imbraceco/ai-agent:v0.0.1-c9c524a
+    image: docker.io/imbraceco/ai-agent:v0.0.1-3bd81f6
     restart: "no"
     depends_on:
       ai-agent-db-init:
@@ -932,7 +955,7 @@ services:
     networks: [imbrace-net]
 
   ai-agent:
-    image: docker.io/imbraceco/ai-agent:v0.0.1-c9c524a
+    image: docker.io/imbraceco/ai-agent:v0.0.1-3bd81f6
     container_name: imbrace-svc-ai-agent
     restart: unless-stopped
     depends_on:
@@ -1004,7 +1027,7 @@ services:
   # No separate migrate job: the production api bundle ships no Nx workspace
   # and runs its TypeORM migrations itself at boot (migrationsRun: true).
   apworkflow-api:
-    image: docker.io/imbraceco/apwf:dev-be-288ed0d
+    image: docker.io/imbraceco/apwf:dev-be-6009262
     container_name: imbrace-svc-apworkflow-api
     restart: unless-stopped
     depends_on:
@@ -1089,7 +1112,7 @@ services:
           - imbrace-svc-apworkflow-api.imbrace-services
 
   apworkflow-app:
-    image: docker.io/imbraceco/apwf:dev-fe-288ed0d
+    image: docker.io/imbraceco/apwf:dev-fe-6009262
     container_name: imbrace-svc-apworkflow-app
     restart: unless-stopped
     # nginx resolves BACKEND_UPSTREAM at start and exits if the api container
@@ -1100,7 +1123,10 @@ services:
     environment:
       AP_ENVIRONMENT: "dev"
       # allowed origins: proxy :30700, unified web :6868, ws :6868
-      WEBAPP_ORIGIN: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700 ${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868 ${WS_SCHEME:-ws}://${PUBLIC_HOST:-localhost}:6868"
+      # Dashboard origins allowed to embed the workflow app (CSP frame-ancestors). The
+      # localhost ones let the dashboard also work at localhost:6868 on the Docker host
+      # when PUBLIC_HOST is the machine's IP.
+      WEBAPP_ORIGIN: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700 ${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:6868 ${WS_SCHEME:-ws}://${PUBLIC_HOST:-localhost}:6868 http://localhost:6868 http://127.0.0.1:6868"
       BACKEND_UPSTREAM: "http://imbrace-svc-apworkflow-api:3000"
       AP_FRONTEND_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700"
       AP_INTERNAL_URL: "http://imbrace-svc-apworkflow-api:3000/api"
@@ -1119,7 +1145,7 @@ services:
           - imbrace-svc-apworkflow-app.imbrace-services
 
   apworkflow-worker:
-    image: docker.io/imbraceco/apwf:dev-engine-288ed0d
+    image: docker.io/imbraceco/apwf:dev-engine-6009262
     container_name: imbrace-svc-apworkflow-worker
     restart: unless-stopped
     depends_on:
@@ -1218,7 +1244,7 @@ services:
   # ===========================================================================
 
   app-gateway:
-    image: docker.io/imbraceco/app-gateway:v0.0.1-838c5b1
+    image: docker.io/imbraceco/app-gateway:v0.0.1-aaf628e
     container_name: imbrace-svc-app-gateway
     restart: unless-stopped
     # The gateway wires its upstreams at startup (chart frontendRedeploy hook
@@ -1360,7 +1386,9 @@ services:
         condition: service_started
     ports:
       - "30050:3000"
-    command: ["/bin/sh", "-c", "printf '%s' \"$$WIDGET_ENV\" > /usr/share/nginx/html/env && exec /generate-env-json.sh"]
+    # The image entrypoint is /generate-env-json.sh: as `command` this line would only
+    # be its arguments and WIDGET_ENV would never be written.
+    entrypoint: ["/bin/sh", "-c", "printf '%s' \"$$WIDGET_ENV\" > /usr/share/nginx/html/env && exec /generate-env-json.sh"]
     environment:
       APP_GATEWAY_URL: "http://imbrace-svc-app-gateway:9001"
       VITE_APP_API_HOST: "http://imbrace-svc-app-gateway:9001"
@@ -1410,6 +1438,115 @@ services:
         target: /etc/nginx/nginx.conf
     networks:
       imbrace-net:
+
+  # ===========================================================================
+  # EXAMPLE: customer-request (examples/customer-request) — seeded on first start
+  #   customer-request-stub : stub endpoints the example flows call
+  #                           (/notify /approvals /business-system; /calls to
+  #                           inspect them). Host :30800 on 127.0.0.1 only.
+  #   examples-seed         : one-shot job. Imports + publishes the two example
+  #                           flows (never overwrites a flow that exists), creates
+  #                           the "imbrace-api-key" connection, and creates the AI
+  #                           agent "Customer Request Classifier" as soon as an
+  #                           LLM provider of type CLASSIFIER_PROVIDER_TYPE exists
+  #                           (checks every 30 s, then exits 0).
+  #                           SEED_EXAMPLES=false in .env turns it off.
+  # Both run the scripts inlined under configs: (block generated by
+  # examples/customer-request/scripts/sync-deploy.mjs — edit the example, then
+  # re-run that script).
+  # ===========================================================================
+
+  customer-request-stub:
+    image: docker.io/library/node:20-alpine
+    container_name: imbrace-example-stub
+    restart: unless-stopped
+    command: ["node", "/app/server.js"]
+    environment:
+      PORT: "8080"
+      CALLS_FILE: "/data/calls.jsonl"
+    configs:
+      - source: example-customer-request-stub
+        target: /app/server.js
+    volumes:
+      - example-stub-data:/data
+    ports:
+      - "127.0.0.1:30800:8080"
+    networks:
+      imbrace-net:
+        aliases:
+          - customer-request-stub
+
+  examples-seed:
+    image: docker.io/library/node:20-alpine
+    container_name: imbrace-examples-seed
+    # Exits 0 when done; restarts only if it failed (e.g. the stack took too long).
+    restart: on-failure
+    depends_on:
+      edge-proxy:
+        condition: service_started
+      platform-service:
+        condition: service_started
+      apworkflow-api:
+        condition: service_started
+      chat-ai:
+        condition: service_started
+      ai-agent:
+        condition: service_started
+      marketplace:
+        condition: service_started
+      customer-request-stub:
+        condition: service_started
+    environment:
+      SEED_EXAMPLES: ${SEED_EXAMPLES:-true}
+      # In-network gateway (edge-proxy service name), not the public URL.
+      IMBRACE_API: "http://edge-proxy:6868/api"
+      # Only printed in the log: the public webhook base of the example flows.
+      WORKFLOW_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700"
+      # Must match platform-service NEW_ORG_USERNAME / NEW_ORG_PASSWORD.
+      IMBRACE_EMAIL: "admin@imbrace.co"
+      IMBRACE_PASSWORD: "ChangeMe@12345"
+      CLASSIFIER_PROVIDER_TYPE: ${CLASSIFIER_PROVIDER_TYPE:-bedrock}
+      CLASSIFIER_MODEL: ${CLASSIFIER_MODEL:-qwen.qwen3-32b-v1:0}
+    command: ["node", "/seed/customer-request/scripts/setup.mjs", "--seed", "--wait-api", "--wait-provider"]
+    configs:
+      - source: example-customer-request-setup
+        target: /seed/customer-request/scripts/setup.mjs
+      - source: example-customer-request-intake
+        target: /seed/customer-request/flows/intake.json
+      - source: example-customer-request-reply-router
+        target: /seed/customer-request/flows/reply-router.json
+      - source: example-customer-request-agent
+        target: /seed/customer-request/agents/request-classifier.json
+    networks: [imbrace-net]
+
+  # Command-line driver for the example — nothing to install on the host:
+  #   docker compose run --rm examples request REQ-1001   # post a request, wait
+  #   docker compose run --rm examples reply   REQ-1001   # post the reply -> 202
+  #   docker compose run --rm examples approve REQ-1001   # or the Todos page
+  #   docker compose run --rm examples result  REQ-1001   # what the business system got
+  #   docker compose run --rm examples urls               # the two webhook URLs
+  # Profile "tools": not started by `up`, only by `run`.
+  examples:
+    image: docker.io/library/node:20-alpine
+    profiles: [tools]
+    entrypoint: ["node", "/seed/customer-request/scripts/cli.mjs"]
+    command: ["help"]
+    environment:
+      IMBRACE_API: "http://edge-proxy:6868/api"
+      # Must match platform-service NEW_ORG_USERNAME / NEW_ORG_PASSWORD.
+      IMBRACE_EMAIL: "admin@imbrace.co"
+      IMBRACE_PASSWORD: "ChangeMe@12345"
+      WORKFLOW_INTERNAL_URL: "http://imbrace-svc-apworkflow-proxy:8080"
+      WORKFLOW_URL: "${PUBLIC_SCHEME:-http}://${PUBLIC_HOST:-localhost}:30700"
+      STUB_URL: "http://customer-request-stub:8080"
+    configs:
+      - source: example-customer-request-cli
+        target: /seed/customer-request/scripts/cli.mjs
+      - source: example-customer-request-payload-request
+        target: /seed/customer-request/payloads/request.json
+      - source: example-customer-request-payload-reply
+        target: /seed/customer-request/payloads/reply.json
+    networks: [imbrace-net]
 
 # =============================================================================
 # INLINE CONFIG FILES
@@ -1515,6 +1652,19 @@ configs:
         # containers aren't up yet (Docker's embedded DNS).
         resolver 127.0.0.11 valid=10s;
 
+        # Dashboard files the image serves without Cache-Control (index.html,
+        # /locale/*.json translations, ...) get "no-cache": the browser always
+        # revalidates (ETag -> 304) instead of guessing a lifetime from
+        # Last-Modified. Without it an upgraded stack kept serving a stale
+        # en.json from the browser cache for days, so new pages showed raw
+        # translation keys (llm_provider_page_title, ...). Responses that set
+        # their own Cache-Control (/assets/ immutable, /config no-store) are
+        # left alone; add_header skips an empty value.
+        map $$upstream_http_cache_control $$dashboard_cache_control {
+          ''      "no-cache";
+          default "";
+        }
+
         server {
           listen 6868;
           server_name _;
@@ -1578,6 +1728,7 @@ configs:
           # everything else -> dashboard SPA
           location / {
             proxy_pass http://$$dashboard;
+            add_header Cache-Control $$dashboard_cache_control always;
             proxy_http_version 1.1;
             proxy_set_header Host              $$host;
             proxy_set_header X-Real-IP         $$remote_addr;
@@ -1668,6 +1819,1269 @@ configs:
         }
       }
 
+  # >>> customer-request example (generated by examples/customer-request/scripts/sync-deploy.mjs, do not edit)
+
+  # scripts/setup.mjs
+  example-customer-request-setup:
+    content: |
+      // Imports the example flows into iMBrace Workflow, publishes and enables them.
+      // Node 18+, no dependencies. Writes the webhook URLs to scripts/.state.json.
+      //
+      //   node scripts/setup.mjs                 create the AI agent, import (or update) both flows
+      //   node scripts/setup.mjs --state-only    only look the flows up and write .state.json
+      //
+      // The CE stack (deploy/docker-compose.yml) runs it as the examples-seed service with
+      //   --seed           never overwrite a flow that already exists, do not write .state.json;
+      //                    SEED_EXAMPLES=false makes it exit without doing anything
+      //   --wait-api       retry until the stack answers (fresh install)
+      //   --wait-provider  without an LLM provider, import the flows anyway, then check every
+      //                    30 s and create the AI agent as soon as a provider is added
+      import { readFileSync, writeFileSync } from 'node:fs';
+      import { dirname, join } from 'node:path';
+      import { fileURLToPath } from 'node:url';
+
+      const here = dirname(fileURLToPath(import.meta.url));
+      const root = join(here, '..');
+      const env = (k, d) => process.env[k] ?? d;
+      const flags = new Set(process.argv.slice(2));
+      const SEED = flags.has('--seed');
+      const WAIT_API = flags.has('--wait-api');
+      const WAIT_PROVIDER = flags.has('--wait-provider');
+      const STATE_ONLY = flags.has('--state-only');
+
+      const GATEWAY = env('IMBRACE_API', 'http://127.0.0.1:6868/api');
+      const WORKFLOW_PUBLIC = env('WORKFLOW_URL', 'http://127.0.0.1:30700');
+      const EMAIL = env('IMBRACE_EMAIL', 'admin@imbrace.co');
+      const PASSWORD = env('IMBRACE_PASSWORD', 'ChangeMe@12345');
+
+      const CLASSIFIER_PROVIDER_TYPE = env('CLASSIFIER_PROVIDER_TYPE', 'bedrock');
+      const CLASSIFIER_MODEL = env('CLASSIFIER_MODEL', 'qwen.qwen3-32b-v1:0');
+      const CLASSIFIER_PLACEHOLDER = '__CLASSIFIER_ASSISTANT_ID__';
+
+      const FLOWS = [
+        { key: 'intake', file: 'flows/intake.json' },
+        { key: 'replyRouter', file: 'flows/reply-router.json' },
+      ];
+
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+      async function call(method, path, { token, body, orgId } = {}) {
+        const res = await fetch(`$${GATEWAY}$${path}`, {
+          method,
+          headers: {
+            'content-type': 'application/json',
+            ...(token ? { 'x-access-token': token } : {}),
+            ...(orgId ? { 'x-organization-id': orgId } : {}),
+          },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`$${method} $${path} -> $${res.status} $${text.slice(0, 300)}`);
+        return text ? JSON.parse(text) : {};
+      }
+
+      async function accessToken() {
+        const login = await call('POST', '/platform/v1/login/sign_in', {
+          body: { email: EMAIL, password: PASSWORD },
+        });
+        const orgs = await call('GET', '/platform/v2/organizations', { token: login.token });
+        const org = orgs.data?.[0];
+        if (!org) throw new Error('no organization found for this user');
+        const fresh = await call('POST', '/platform/v1/login/sign_in', {
+          body: { email: EMAIL, password: PASSWORD },
+        });
+        const acc = await call('POST', '/platform/v1/access/_exchange_access_token', {
+          token: fresh.token,
+          body: { organization_id: org.id },
+        });
+        return { token: acc.token, organizationId: org.id };
+      }
+
+      // Login plus the workflow project of the organization.
+      async function session() {
+        const { token, organizationId } = await accessToken();
+        const me = await call('GET', '/activepieces/v1/users/me', { token });
+        if (!me.projectId) throw new Error('the workflow project of this organization is not ready');
+        return { token, organizationId, projectId: me.projectId };
+      }
+
+      // On a fresh install the services come up one by one; keep trying for up to 10 minutes,
+      // until the AI service (chat-ai) and the marketplace answer too.
+      async function sessionWhenReady() {
+        const deadline = Date.now() + 10 * 60_000;
+        for (;;) {
+          try {
+            const s = await session();
+            if (WAIT_API) {
+              await call('GET', '/ai/v3/providers', { token: s.token, orgId: s.organizationId });
+              await call('GET', '/v3/marketplaces/use-cases', { token: s.token, orgId: s.organizationId });
+            }
+            return s;
+          } catch (e) {
+            if (!WAIT_API || Date.now() > deadline) throw e;
+            console.log(`waiting for the iMBrace API ($${e.message.split('\n')[0].slice(0, 120)})`);
+            await sleep(10_000);
+          }
+        }
+      }
+
+      async function findProvider(token, orgId) {
+        const providers = await call('GET', '/ai/v3/providers', { token, orgId });
+        return (providers.data ?? providers).find((p) => p.type === CLASSIFIER_PROVIDER_TYPE);
+      }
+
+      // The flow's AI step calls an iMBrace AI agent. It is created the way the dashboard creates
+      // one (a marketplace use case wrapping the assistant), so it shows on the AI Agent page.
+      // Returns null when there is no LLM provider yet and --wait-provider is set.
+      async function ensureClassifier(token, orgId) {
+        const agent = JSON.parse(readFileSync(join(root, 'agents/request-classifier.json'), 'utf8'));
+        const useCases = await call('GET', '/v3/marketplaces/use-cases', { token, orgId });
+        const existing = (useCases.data ?? useCases).find((u) => u.title === agent.name && u.type === 'custom');
+        if (existing) {
+          await removeStandaloneCopies(token, orgId, agent.name, existing.assistant_id);
+          return existing.assistant_id;
+        }
+        const provider = await findProvider(token, orgId);
+        if (!provider) {
+          if (WAIT_PROVIDER) return null;
+          throw new Error(
+            `no "$${CLASSIFIER_PROVIDER_TYPE}" LLM provider in this organization. ` +
+              'Add one in the dashboard (LLM Provider page) first, or set CLASSIFIER_PROVIDER_TYPE.',
+          );
+        }
+        const assistantId = await createClassifier(token, orgId, agent, provider);
+        await removeStandaloneCopies(token, orgId, agent.name, assistantId);
+        return assistantId;
+      }
+
+      async function createClassifier(token, orgId, agent, provider) {
+        // The dashboard points the agent's demo link at the chat widget; read its URL from the dashboard config.
+        const dashboardConfig = await fetch(`$${new URL(GATEWAY).origin}/config`).then((r) => r.json()).catch(() => ({}));
+        const workflowName = `Standard | $${agent.name}`;
+        const created = await call('POST', '/v3/marketplaces/use-cases/v2/custom', {
+          token,
+          orgId,
+          body: {
+            usecase: {
+              title: agent.name,
+              short_description: agent.description,
+              demo_url: dashboardConfig.VITE_APP_CHAT_HOST ?? '',
+              supported_channels: [],
+              agent_type: 'agent',
+            },
+            assistant: {
+              ...agent,
+              model_id: CLASSIFIER_MODEL,
+              provider_id: provider.id,
+              workflow_name: workflowName,
+              credential_name: workflowName,
+              agent_type: 'agent',
+              version: 2,
+              category: [],
+              metadata: {},
+              file_ids: [],
+              folder_ids: [],
+              board_ids: [],
+              knowledge_hubs: [],
+              workflow_function_call: [],
+            },
+          },
+        });
+        console.log(`created AI agent "$${agent.name}" ($${CLASSIFIER_MODEL} on $${provider.name})`);
+        return created.data.assistant_id;
+      }
+
+      // Earlier versions of this script created the assistant without a use case, so it never showed
+      // on the AI Agent page. Remove such leftovers with the same name.
+      async function removeStandaloneCopies(token, orgId, name, keepId) {
+        const list = await call('GET', '/ai/v3/accounts/assistants?limit=1000', { token, orgId });
+        for (const a of list.data ?? list) {
+          const id = a.id ?? a.assistant_id;
+          if (a.name === name && id !== keepId) {
+            await call('DELETE', `/ai/v3/assistant_apps/$${id}`, { token, orgId });
+            console.log(`removed old standalone AI agent $${id}`);
+          }
+        }
+      }
+
+      // The AI step runs from a plain webhook, so it authenticates with an organization API key
+      // kept in a workflow connection. Created once; re-runs reuse the existing connection.
+      const CONNECTION_NAME = 'imbrace-api-key';
+      async function ensureApiKeyConnection(token, orgId, projectId) {
+        const existing = await call('GET', `/activepieces/v1/app-connections?projectId=$${projectId}&limit=100`, { token });
+        if ((existing.data ?? []).some((c) => c.externalId === CONNECTION_NAME)) return;
+
+        const created = await call('POST', '/platform/v1/third_party_token', {
+          token,
+          orgId,
+          body: { name: 'workflow: customer-request example' },
+        });
+        const apiKey = created.apiKey?._id;
+        if (!apiKey) throw new Error('could not create an organization API key');
+        await call('POST', '/activepieces/v1/app-connections', {
+          token,
+          body: {
+            externalId: CONNECTION_NAME,
+            displayName: 'iMBrace API key',
+            pieceName: '@activepieces/piece-ai-connector',
+            projectId,
+            type: 'SECRET_TEXT',
+            value: { type: 'SECRET_TEXT', secret_text: apiKey },
+          },
+        });
+        console.log(`created API key connection "$${CONNECTION_NAME}"`);
+      }
+
+      function readFlow(file, { classifierId, organizationId }) {
+        let text = readFileSync(join(root, file), 'utf8').replaceAll('__ORGANIZATION_ID__', organizationId);
+        if (classifierId) text = text.replaceAll(CLASSIFIER_PLACEHOLDER, classifierId);
+        return JSON.parse(text);
+      }
+
+      function flowState(flow, displayName) {
+        return { id: flow.id, displayName, webhookUrl: `$${WORKFLOW_PUBLIC}/api/v1/webhooks/$${flow.id}` };
+      }
+
+      // In --seed mode a flow that already exists is left alone (it may have been edited in the UI),
+      // unless it still waits for the AI agent and the agent now exists.
+      async function keepExisting(token, flow, classifierId) {
+        if (!SEED) return false;
+        if (!classifierId) return true;
+        const current = await call('GET', `/activepieces/v1/flows/$${flow.id}`, { token });
+        return !JSON.stringify(current.version ?? {}).includes(CLASSIFIER_PLACEHOLDER);
+      }
+
+      async function importFlows({ token, organizationId, projectId }, classifierId) {
+        const existing = await call('GET', '/activepieces/v1/flows?limit=100', { token });
+        const flows = {};
+        for (const { key, file } of FLOWS) {
+          const def = readFlow(file, { classifierId, organizationId });
+          let flow = existing.data.find((f) => f.version?.displayName === def.displayName);
+          if (flow && (await keepExisting(token, flow, classifierId))) {
+            flows[key] = flowState(flow, def.displayName);
+            console.log(`$${def.displayName}: $${flows[key].webhookUrl} (already there, kept as is)`);
+            continue;
+          }
+          if (flow && flow.status === 'ENABLED') {
+            await call('POST', `/activepieces/v1/flows/$${flow.id}`, {
+              token,
+              body: { type: 'CHANGE_STATUS', request: { status: 'DISABLED' } },
+            });
+          }
+          if (!flow) {
+            flow = await call('POST', '/activepieces/v1/flows', {
+              token,
+              body: { displayName: def.displayName, projectId },
+            });
+          }
+          await call('POST', `/activepieces/v1/flows/$${flow.id}`, {
+            token,
+            body: { type: 'IMPORT_FLOW', request: def },
+          });
+          await call('POST', `/activepieces/v1/flows/$${flow.id}`, {
+            token,
+            body: { type: 'LOCK_AND_PUBLISH', request: {} },
+          });
+          await call('POST', `/activepieces/v1/flows/$${flow.id}`, {
+            token,
+            body: { type: 'CHANGE_STATUS', request: { status: 'ENABLED' } },
+          });
+          flows[key] = flowState(flow, def.displayName);
+          console.log(`$${def.displayName}: $${flows[key].webhookUrl}`);
+        }
+        return flows;
+      }
+
+      async function lookUpFlows({ token }) {
+        const existing = await call('GET', '/activepieces/v1/flows?limit=100', { token });
+        const flows = {};
+        for (const { key, file } of FLOWS) {
+          const { displayName } = JSON.parse(readFileSync(join(root, file), 'utf8'));
+          const flow = existing.data.find((f) => f.version?.displayName === displayName);
+          if (!flow) throw new Error(`flow "$${displayName}" not found; run "node scripts/setup.mjs" to import it`);
+          flows[key] = flowState(flow, displayName);
+          console.log(`$${displayName}: $${flows[key].webhookUrl}`);
+        }
+        return flows;
+      }
+
+      function saveState(state) {
+        writeFileSync(join(here, '.state.json'), JSON.stringify(state, null, 2) + '\n');
+        console.log(`saved $${join('scripts', '.state.json')}`);
+      }
+
+      async function main() {
+        if (SEED && /^(false|0|no|off)$$/i.test(env('SEED_EXAMPLES', 'true'))) {
+          console.log('SEED_EXAMPLES is off, nothing to do');
+          return;
+        }
+        const s = await sessionWhenReady();
+
+        if (STATE_ONLY) {
+          const flows = await lookUpFlows(s);
+          saveState({ organizationId: s.organizationId, projectId: s.projectId, flows });
+          return;
+        }
+
+        let classifierId = await ensureClassifier(s.token, s.organizationId);
+        await ensureApiKeyConnection(s.token, s.organizationId, s.projectId);
+        let flows = await importFlows(s, classifierId);
+
+        if (!classifierId) {
+          console.log(
+            `no "$${CLASSIFIER_PROVIDER_TYPE}" LLM provider yet: the flows are imported, the AI step needs the agent. ` +
+              'Add a provider in the dashboard (LLM Provider page); the agent is created within 30 seconds.',
+          );
+          while (!classifierId) {
+            await sleep(30_000);
+            const fresh = await sessionWhenReady(); // the access token may have expired meanwhile
+            Object.assign(s, fresh);
+            if (!(await findProvider(s.token, s.organizationId))) continue;
+            classifierId = await ensureClassifier(s.token, s.organizationId);
+          }
+          flows = await importFlows(s, classifierId);
+        }
+
+        if (!SEED) saveState({ organizationId: s.organizationId, projectId: s.projectId, classifierId, flows });
+        console.log('customer-request example is ready');
+      }
+
+      main().catch((e) => {
+        console.error(e.message);
+        process.exit(1);
+      });
+
+  # flows/intake.json
+  example-customer-request-intake:
+    content: |
+      {
+        "displayName": "Customer request - intake",
+        "trigger": {
+          "name": "trigger",
+          "type": "PIECE_TRIGGER",
+          "valid": true,
+          "displayName": "Service request received",
+          "settings": {
+            "pieceName": "@activepieces/piece-webhook",
+            "pieceVersion": "0.1.24",
+            "triggerName": "catch_webhook",
+            "input": {
+              "authType": "none",
+              "authFields": {}
+            },
+            "propertySettings": {}
+          },
+          "nextAction": {
+            "name": "validate_request",
+            "type": "CODE",
+            "valid": true,
+            "displayName": "Validate request",
+            "settings": {
+              "input": {
+                "body": "{{trigger.body}}",
+                "contentType": "{{trigger.headers['content-type']}}"
+              },
+              "sourceCode": {
+                "code": "export const code = async (inputs) => {\n  const body = typeof inputs.body === 'string' ? (() => { try { return JSON.parse(inputs.body); } catch { return null; } })() : inputs.body;\n  if (!body || typeof body !== 'object' || !body.request_id) {\n    throw new Error('request_id is missing. Send a JSON body with header \"content-type: application/json\" (received content-type: ' + (inputs.contentType || 'none') + ').');\n  }\n  return { request_id: body.request_id };\n};",
+                "packageJson": "{}"
+              },
+              "errorHandlingOptions": {
+                "continueOnFailure": {
+                  "value": false
+                },
+                "retryOnFailure": {
+                  "value": false
+                }
+              }
+            },
+            "nextAction": {
+              "name": "run_info",
+              "type": "PIECE",
+              "valid": true,
+              "displayName": "Get run info",
+              "settings": {
+                "pieceName": "@activepieces/piece-flow-helper",
+                "pieceVersion": "0.0.10",
+                "actionName": "getRunId",
+                "input": {},
+                "propertySettings": {},
+                "errorHandlingOptions": {
+                  "continueOnFailure": {
+                    "value": false
+                  },
+                  "retryOnFailure": {
+                    "value": false
+                  }
+                }
+              },
+              "nextAction": {
+                "name": "tag_run",
+                "type": "PIECE",
+                "valid": true,
+                "displayName": "Tag run with request_id",
+                "settings": {
+                  "pieceName": "@activepieces/piece-tags",
+                  "pieceVersion": "0.0.12",
+                  "actionName": "add_tag",
+                  "input": {
+                    "name": "request_id:{{trigger.body.request_id}}"
+                  },
+                  "propertySettings": {},
+                  "errorHandlingOptions": {
+                    "continueOnFailure": {
+                      "value": false
+                    },
+                    "retryOnFailure": {
+                      "value": false
+                    }
+                  }
+                },
+                "nextAction": {
+                  "name": "classify",
+                  "type": "PIECE",
+                  "valid": true,
+                  "displayName": "Classify request (AI agent)",
+                  "settings": {
+                    "pieceName": "@activepieces/piece-ai-connector",
+                    "pieceVersion": "0.0.1",
+                    "actionName": "assistant-request",
+                    "input": {
+                      "auth": "{{connections['imbrace-api-key']}}",
+                      "assistant_id": "__CLASSIFIER_ASSISTANT_ID__",
+                      "version": "v2",
+                      "modelName": "Default",
+                      "enableCustomPrompt": true,
+                      "prompt": {
+                        "prompt": "Classify this customer service request. Reply with ONLY one JSON object and no other text: {\"category\": \"repair\" | \"installation\" | \"maintenance\" | \"billing\" | \"other\", \"urgency\": \"low\" | \"medium\" | \"high\", \"summary\": \"at most 20 words\"}\n\nService: {{trigger.body.service}}\nDescription: {{trigger.body.description}}"
+                      },
+                      "voiceMessage": false,
+                      "enableSuggestions": false
+                    },
+                    "propertySettings": {},
+                    "errorHandlingOptions": {
+                      "continueOnFailure": {
+                        "value": false
+                      },
+                      "retryOnFailure": {
+                        "value": false
+                      }
+                    }
+                  },
+                  "nextAction": {
+                    "name": "check_fields",
+                    "type": "CODE",
+                    "valid": true,
+                    "displayName": "Check required fields",
+                    "settings": {
+                      "input": {
+                        "request": "{{trigger.body}}",
+                        "classification": "{{classify}}"
+                      },
+                      "sourceCode": {
+                        "code": "export const code = async (inputs) => {\n  const required = ['customer_name', 'email', 'address', 'preferred_date'];\n  const req = typeof inputs.request === 'string' ? JSON.parse(inputs.request) : inputs.request;\n  const missing = required.filter((f) => req?.[f] === undefined || req?.[f] === null || String(req[f]).trim() === '');\n  let classification = null;\n  try {\n    const text = String(inputs.classification ?? '');\n    classification = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));\n  } catch {\n    classification = { category: 'other', urgency: 'medium', summary: String(inputs.classification ?? '') };\n  }\n  return { missing, complete: missing.length === 0, classification };\n};",
+                        "packageJson": "{}"
+                      },
+                      "errorHandlingOptions": {
+                        "continueOnFailure": {
+                          "value": false
+                        },
+                        "retryOnFailure": {
+                          "value": false
+                        }
+                      }
+                    },
+                    "nextAction": {
+                      "name": "missing_info",
+                      "type": "ROUTER",
+                      "valid": true,
+                      "displayName": "Information missing?",
+                      "settings": {
+                        "branches": [
+                          {
+                            "branchName": "Missing fields",
+                            "branchType": "CONDITION",
+                            "conditions": [
+                              [
+                                {
+                                  "firstValue": "{{check_fields.missing}}",
+                                  "operator": "LIST_IS_NOT_EMPTY"
+                                }
+                              ]
+                            ]
+                          },
+                          {
+                            "branchName": "Complete",
+                            "branchType": "FALLBACK"
+                          }
+                        ],
+                        "executionType": "EXECUTE_FIRST_MATCH",
+                        "errorHandlingOptions": {
+                          "continueOnFailure": {
+                            "value": false
+                          },
+                          "retryOnFailure": {
+                            "value": false
+                          }
+                        }
+                      },
+                      "children": [
+                        {
+                          "name": "notify_customer",
+                          "type": "PIECE",
+                          "valid": true,
+                          "displayName": "Ask customer for missing information",
+                          "settings": {
+                            "pieceName": "@activepieces/piece-http",
+                            "pieceVersion": "0.9.1",
+                            "actionName": "send_request",
+                            "input": {
+                              "method": "POST",
+                              "url": "http://customer-request-stub:8080/notify",
+                              "headers": {},
+                              "queryParams": {},
+                              "authType": "NONE",
+                              "authFields": {},
+                              "body_type": "json",
+                              "body": {
+                                "data": {
+                                  "request_id": "{{trigger.body.request_id}}",
+                                  "run_id": "{{run_info.id}}",
+                                  "missing_fields": "{{check_fields.missing}}",
+                                  "classification": "{{check_fields.classification}}",
+                                  "message": "Information required to process your request"
+                                }
+                              },
+                              "response_is_binary": false,
+                              "use_proxy": false,
+                              "failureMode": "retry_none"
+                            },
+                            "propertySettings": {},
+                            "errorHandlingOptions": {
+                              "continueOnFailure": {
+                                "value": false
+                              },
+                              "retryOnFailure": {
+                                "value": false
+                              }
+                            }
+                          },
+                          "nextAction": {
+                            "name": "wait_for_reply",
+                            "type": "PIECE",
+                            "valid": true,
+                            "displayName": "Wait for customer reply",
+                            "settings": {
+                              "pieceName": "@activepieces/piece-webhook",
+                              "pieceVersion": "0.1.24",
+                              "actionName": "wait_for_event",
+                              "input": {
+                                "key": "{{trigger.body.request_id}}"
+                              },
+                              "propertySettings": {},
+                              "errorHandlingOptions": {
+                                "continueOnFailure": {
+                                  "value": false
+                                },
+                                "retryOnFailure": {
+                                  "value": false
+                                }
+                              }
+                            }
+                          }
+                        },
+                        null
+                      ],
+                      "nextAction": {
+                        "name": "create_approval",
+                        "type": "PIECE",
+                        "valid": true,
+                        "displayName": "Create approval task",
+                        "settings": {
+                          "pieceName": "@activepieces/piece-todos",
+                          "pieceVersion": "0.0.12",
+                          "actionName": "createTodo",
+                          "input": {
+                            "title": "Approve service request {{trigger.body.request_id}}",
+                            "description": "Category: {{check_fields.classification.category}} ({{check_fields.classification.urgency}})\nSummary: {{check_fields.classification.summary}}\nService: {{trigger.body.service}}\nCustomer: {{trigger.body.customer_name}}\nRun: {{run_info.url}}",
+                            "statusOptions": [
+                              {
+                                "name": "Approve",
+                                "variant": "Positive (Green)",
+                                "continueFlow": true
+                              },
+                              {
+                                "name": "Reject",
+                                "variant": "Negative (Red)",
+                                "continueFlow": true
+                              }
+                            ]
+                          },
+                          "propertySettings": {},
+                          "errorHandlingOptions": {
+                            "continueOnFailure": {
+                              "value": false
+                            },
+                            "retryOnFailure": {
+                              "value": false
+                            }
+                          }
+                        },
+                        "nextAction": {
+                          "name": "publish_approval_links",
+                          "type": "PIECE",
+                          "valid": true,
+                          "displayName": "Publish approval links",
+                          "settings": {
+                            "pieceName": "@activepieces/piece-http",
+                            "pieceVersion": "0.9.1",
+                            "actionName": "send_request",
+                            "input": {
+                              "method": "POST",
+                              "url": "http://customer-request-stub:8080/approvals",
+                              "headers": {},
+                              "queryParams": {},
+                              "authType": "NONE",
+                              "authFields": {},
+                              "body_type": "json",
+                              "body": {
+                                "data": {
+                                  "request_id": "{{trigger.body.request_id}}",
+                                  "run_id": "{{run_info.id}}",
+                                  "todo_id": "{{create_approval.id}}",
+                                  "links": "{{create_approval.links}}"
+                                }
+                              },
+                              "response_is_binary": false,
+                              "use_proxy": false,
+                              "failureMode": "retry_none"
+                            },
+                            "propertySettings": {},
+                            "errorHandlingOptions": {
+                              "continueOnFailure": {
+                                "value": false
+                              },
+                              "retryOnFailure": {
+                                "value": false
+                              }
+                            }
+                          },
+                          "nextAction": {
+                            "name": "wait_for_approval",
+                            "type": "PIECE",
+                            "valid": true,
+                            "displayName": "Wait for approval",
+                            "settings": {
+                              "pieceName": "@activepieces/piece-todos",
+                              "pieceVersion": "0.0.12",
+                              "actionName": "wait_for_approval",
+                              "input": {
+                                "taskId": "{{create_approval.id}}"
+                              },
+                              "propertySettings": {},
+                              "errorHandlingOptions": {
+                                "continueOnFailure": {
+                                  "value": false
+                                },
+                                "retryOnFailure": {
+                                  "value": false
+                                }
+                              }
+                            },
+                            "nextAction": {
+                              "name": "approval_result",
+                              "type": "ROUTER",
+                              "valid": true,
+                              "displayName": "Approved?",
+                              "settings": {
+                                "branches": [
+                                  {
+                                    "branchName": "Approved",
+                                    "branchType": "CONDITION",
+                                    "conditions": [
+                                      [
+                                        {
+                                          "firstValue": "{{wait_for_approval.status}}",
+                                          "operator": "TEXT_EXACTLY_MATCHES",
+                                          "secondValue": "Approve",
+                                          "caseSensitive": false
+                                        }
+                                      ]
+                                    ]
+                                  },
+                                  {
+                                    "branchName": "Rejected",
+                                    "branchType": "FALLBACK"
+                                  }
+                                ],
+                                "executionType": "EXECUTE_FIRST_MATCH",
+                                "errorHandlingOptions": {
+                                  "continueOnFailure": {
+                                    "value": false
+                                  },
+                                  "retryOnFailure": {
+                                    "value": false
+                                  }
+                                }
+                              },
+                              "children": [
+                                {
+                                  "name": "call_business_system",
+                                  "type": "PIECE",
+                                  "valid": true,
+                                  "displayName": "Create ticket in business system",
+                                  "settings": {
+                                    "pieceName": "@activepieces/piece-http",
+                                    "pieceVersion": "0.9.1",
+                                    "actionName": "send_request",
+                                    "input": {
+                                      "method": "POST",
+                                      "url": "http://customer-request-stub:8080/business-system",
+                                      "headers": {},
+                                      "queryParams": {},
+                                      "authType": "NONE",
+                                      "authFields": {},
+                                      "body_type": "json",
+                                      "body": {
+                                        "data": {
+                                          "request_id": "{{trigger.body.request_id}}",
+                                          "run_id": "{{run_info.id}}",
+                                          "request": "{{trigger.body}}",
+                                          "reply": "{{wait_for_reply.body}}",
+                                          "classification": "{{check_fields.classification}}",
+                                          "approval": "{{wait_for_approval.status}}"
+                                        }
+                                      },
+                                      "response_is_binary": false,
+                                      "use_proxy": false,
+                                      "failureMode": "retry_none"
+                                    },
+                                    "propertySettings": {},
+                                    "errorHandlingOptions": {
+                                      "continueOnFailure": {
+                                        "value": false
+                                      },
+                                      "retryOnFailure": {
+                                        "value": false
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "notify_rejected",
+                                  "type": "PIECE",
+                                  "valid": true,
+                                  "displayName": "Tell customer the request was rejected",
+                                  "settings": {
+                                    "pieceName": "@activepieces/piece-http",
+                                    "pieceVersion": "0.9.1",
+                                    "actionName": "send_request",
+                                    "input": {
+                                      "method": "POST",
+                                      "url": "http://customer-request-stub:8080/notify",
+                                      "headers": {},
+                                      "queryParams": {},
+                                      "authType": "NONE",
+                                      "authFields": {},
+                                      "body_type": "json",
+                                      "body": {
+                                        "data": {
+                                          "request_id": "{{trigger.body.request_id}}",
+                                          "run_id": "{{run_info.id}}",
+                                          "message": "Your request was rejected",
+                                          "approval": "{{wait_for_approval.status}}"
+                                        }
+                                      },
+                                      "response_is_binary": false,
+                                      "use_proxy": false,
+                                      "failureMode": "retry_none"
+                                    },
+                                    "propertySettings": {},
+                                    "errorHandlingOptions": {
+                                      "continueOnFailure": {
+                                        "value": false
+                                      },
+                                      "retryOnFailure": {
+                                        "value": false
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "schemaVersion": null
+      }
+
+  # flows/reply-router.json
+  example-customer-request-reply-router:
+    content: |
+      {
+        "displayName": "Customer request - reply router",
+        "trigger": {
+          "name": "trigger",
+          "type": "PIECE_TRIGGER",
+          "valid": true,
+          "displayName": "Customer reply received",
+          "settings": {
+            "pieceName": "@activepieces/piece-webhook",
+            "pieceVersion": "0.1.24",
+            "triggerName": "catch_webhook",
+            "input": {
+              "authType": "none",
+              "authFields": {}
+            },
+            "propertySettings": {}
+          },
+          "nextAction": {
+            "name": "resume",
+            "type": "PIECE",
+            "valid": true,
+            "displayName": "Resume the run waiting for this request_id",
+            "settings": {
+              "pieceName": "@activepieces/piece-webhook",
+              "pieceVersion": "0.1.24",
+              "actionName": "resume_waiting_run",
+              "input": {
+                "key": "{{trigger.body.request_id}}",
+                "data": "{{trigger.body}}",
+                "failIfNotFound": false
+              },
+              "propertySettings": {},
+              "errorHandlingOptions": {
+                "continueOnFailure": {
+                  "value": false
+                },
+                "retryOnFailure": {
+                  "value": false
+                }
+              }
+            },
+            "nextAction": {
+              "name": "found",
+              "type": "ROUTER",
+              "valid": true,
+              "displayName": "Was a run waiting?",
+              "settings": {
+                "branches": [
+                  {
+                    "branchName": "Resumed",
+                    "branchType": "CONDITION",
+                    "conditions": [
+                      [
+                        {
+                          "firstValue": "{{resume.resumed}}",
+                          "operator": "BOOLEAN_IS_TRUE"
+                        }
+                      ]
+                    ]
+                  },
+                  {
+                    "branchName": "Nothing waiting",
+                    "branchType": "FALLBACK"
+                  }
+                ],
+                "executionType": "EXECUTE_FIRST_MATCH",
+                "errorHandlingOptions": {
+                  "continueOnFailure": {
+                    "value": false
+                  },
+                  "retryOnFailure": {
+                    "value": false
+                  }
+                }
+              },
+              "children": [
+                {
+                  "name": "accepted",
+                  "type": "PIECE",
+                  "valid": true,
+                  "displayName": "Reply 202 accepted",
+                  "settings": {
+                    "pieceName": "@activepieces/piece-webhook",
+                    "pieceVersion": "0.1.24",
+                    "actionName": "return_response",
+                    "input": {
+                      "responseType": "json",
+                      "respond": "stop",
+                      "fields": {
+                        "status": 202,
+                        "headers": {},
+                        "body": {
+                          "status": "resumed",
+                          "request_id": "{{trigger.body.request_id}}"
+                        }
+                      }
+                    },
+                    "propertySettings": {},
+                    "errorHandlingOptions": {
+                      "continueOnFailure": {
+                        "value": false
+                      },
+                      "retryOnFailure": {
+                        "value": false
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "not_found",
+                  "type": "PIECE",
+                  "valid": true,
+                  "displayName": "Reply 404 no waiting request",
+                  "settings": {
+                    "pieceName": "@activepieces/piece-webhook",
+                    "pieceVersion": "0.1.24",
+                    "actionName": "return_response",
+                    "input": {
+                      "responseType": "json",
+                      "respond": "stop",
+                      "fields": {
+                        "status": 404,
+                        "headers": {},
+                        "body": {
+                          "status": "no waiting request",
+                          "request_id": "{{trigger.body.request_id}}"
+                        }
+                      }
+                    },
+                    "propertySettings": {},
+                    "errorHandlingOptions": {
+                      "continueOnFailure": {
+                        "value": false
+                      },
+                      "retryOnFailure": {
+                        "value": false
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "schemaVersion": null
+      }
+
+  # agents/request-classifier.json
+  example-customer-request-agent:
+    content: |
+      {
+        "name": "Customer Request Classifier",
+        "description": "Classifies incoming service requests for the customer-request example",
+        "mode": "standard",
+        "streaming": false,
+        "show_thinking_process": false,
+        "use_memory": false,
+        "temperature": 0,
+        "instructions": "You classify customer service requests. Reply with ONLY one JSON object and nothing else, no markdown fences: {\"category\": one of [\"repair\", \"installation\", \"maintenance\", \"billing\", \"other\"], \"urgency\": one of [\"low\", \"medium\", \"high\"], \"summary\": a sentence of at most 20 words}."
+      }
+
+  # stub/server.js
+  example-customer-request-stub:
+    content: |
+      // Stub endpoints for the customer-request example. No dependencies.
+      // Every call is appended to a JSON-lines file so it survives a container restart.
+      const http = require('node:http');
+      const fs = require('node:fs');
+
+      const PORT = Number(process.env.PORT || 8080);
+      const LOG = process.env.CALLS_FILE || '/data/calls.jsonl';
+      const RECORDED = new Set(['/notify', '/approvals', '/business-system']);
+
+      fs.mkdirSync(require('node:path').dirname(LOG), { recursive: true });
+
+      function readCalls() {
+        if (!fs.existsSync(LOG)) return [];
+        return fs.readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+      }
+
+      function send(res, status, body) {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(body));
+      }
+
+      http
+        .createServer((req, res) => {
+          const url = new URL(req.url, 'http://stub');
+          let raw = '';
+          req.on('data', (c) => (raw += c));
+          req.on('end', () => {
+            if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true });
+
+            if (url.pathname === '/calls') {
+              if (req.method === 'DELETE') {
+                fs.rmSync(LOG, { force: true });
+                return send(res, 200, { cleared: true });
+              }
+              const path = url.searchParams.get('path');
+              const requestId = url.searchParams.get('request_id');
+              const calls = readCalls().filter(
+                (c) => (!path || c.path === path) && (!requestId || c.body?.request_id === requestId),
+              );
+              return send(res, 200, calls);
+            }
+
+            if (req.method === 'POST' && RECORDED.has(url.pathname)) {
+              let body;
+              try {
+                body = raw ? JSON.parse(raw) : {};
+              } catch {
+                return send(res, 400, { error: 'body must be JSON' });
+              }
+              const call = { path: url.pathname, at: new Date().toISOString(), body };
+              fs.appendFileSync(LOG, JSON.stringify(call) + '\n');
+              console.log(`$${call.at} $${call.path} $${JSON.stringify(body)}`);
+              const reply =
+                url.pathname === '/business-system'
+                  ? { ok: true, ticket_id: `TCK-$${Date.now()}` }
+                  : { ok: true };
+              return send(res, 200, reply);
+            }
+
+            send(res, 404, { error: 'not found' });
+          });
+        })
+        .listen(PORT, () => console.log(`stub listening on :$${PORT}, calls -> $${LOG}`));
+
+  # scripts/cli.mjs
+  example-customer-request-cli:
+    content: |
+      // Drives the customer-request example: send a request, the customer's reply, approve, show the result.
+      // Node 18+, no dependencies, no state file: it looks the flows up by name through the gateway.
+      //
+      // From the CE stack (nothing else installed; deploy/docker-compose.yml, service "examples"):
+      //   docker compose run --rm examples request REQ-1001
+      // From a clone of the repo (defaults to the published ports on 127.0.0.1):
+      //   node scripts/cli.mjs request REQ-1001
+      import { readFileSync } from 'node:fs';
+      import { dirname, join } from 'node:path';
+      import { fileURLToPath } from 'node:url';
+
+      const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+      const env = (k, d) => process.env[k] ?? d;
+
+      const GATEWAY = env('IMBRACE_API', 'http://127.0.0.1:6868/api');
+      const EMAIL = env('IMBRACE_EMAIL', 'admin@imbrace.co');
+      const PASSWORD = env('IMBRACE_PASSWORD', 'ChangeMe@12345');
+      // Where this script reaches the workflow webhooks and the stub, and the public webhook base it prints.
+      const WORKFLOW = env('WORKFLOW_INTERNAL_URL', env('WORKFLOW_URL', 'http://127.0.0.1:30700'));
+      const WORKFLOW_PUBLIC = env('WORKFLOW_URL', 'http://127.0.0.1:30700');
+      const STUB = env('STUB_URL', 'http://127.0.0.1:30800');
+
+      const FLOWS = { intake: 'Customer request - intake', replyRouter: 'Customer request - reply router' };
+
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const show = (v) => console.log(JSON.stringify(v, null, 2));
+
+      async function call(method, path, { token, body, orgId } = {}) {
+        const res = await fetch(`$${GATEWAY}$${path}`, {
+          method,
+          headers: {
+            'content-type': 'application/json',
+            ...(token ? { 'x-access-token': token } : {}),
+            ...(orgId ? { 'x-organization-id': orgId } : {}),
+          },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`$${method} $${path} -> $${res.status} $${text.slice(0, 300)}`);
+        return text ? JSON.parse(text) : {};
+      }
+
+      async function accessToken() {
+        const login = await call('POST', '/platform/v1/login/sign_in', {
+          body: { email: EMAIL, password: PASSWORD },
+        });
+        const orgs = await call('GET', '/platform/v2/organizations', { token: login.token });
+        const org = orgs.data?.[0];
+        if (!org) throw new Error('no organization found for this user');
+        const fresh = await call('POST', '/platform/v1/login/sign_in', {
+          body: { email: EMAIL, password: PASSWORD },
+        });
+        const acc = await call('POST', '/platform/v1/access/_exchange_access_token', {
+          token: fresh.token,
+          body: { organization_id: org.id },
+        });
+        return acc.token;
+      }
+
+      // { intake: id, replyRouter: id } of the two example flows.
+      async function flowIds() {
+        const token = await accessToken();
+        const existing = await call('GET', '/activepieces/v1/flows?limit=100', { token });
+        const ids = {};
+        for (const [key, name] of Object.entries(FLOWS)) {
+          const flow = existing.data.find((f) => f.version?.displayName === name);
+          if (!flow) throw new Error(`flow "$${name}" not found: the example is not installed (see docker logs imbrace-examples-seed)`);
+          ids[key] = flow.id;
+        }
+        return ids;
+      }
+
+      function payload(file, requestId) {
+        return JSON.parse(readFileSync(join(root, 'payloads', file), 'utf8').replaceAll('__REQUEST_ID__', requestId));
+      }
+
+      async function post(url, body) {
+        const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        const text = await res.text();
+        let json;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          json = text;
+        }
+        return { status: res.status, body: json };
+      }
+
+      async function stubCalls(path, requestId) {
+        const q = new URLSearchParams({ ...(path ? { path } : {}), ...(requestId ? { request_id: requestId } : {}) });
+        const res = await fetch(`$${STUB}/calls?$${q}`);
+        return res.json();
+      }
+
+      // Latest stub call on <path> for <requestId>, waiting up to <seconds>.
+      async function waitForCall(path, requestId, seconds) {
+        const deadline = Date.now() + seconds * 1000;
+        for (;;) {
+          const calls = await stubCalls(path, requestId);
+          if (calls.length) return calls[calls.length - 1].body;
+          if (Date.now() > deadline) return null;
+          await sleep(2000);
+        }
+      }
+
+      // The approval links carry the public workflow URL; call them through WORKFLOW (in-network inside the stack).
+      function viaWorkflow(url) {
+        const u = new URL(url);
+        return new URL(u.pathname + u.search, WORKFLOW).toString();
+      }
+
+      const commands = {
+        async urls() {
+          const ids = await flowIds();
+          console.log(`intake (service request):  $${WORKFLOW_PUBLIC}/api/v1/webhooks/$${ids.intake}`);
+          console.log(`reply router (reply):      $${WORKFLOW_PUBLIC}/api/v1/webhooks/$${ids.replyRouter}/sync`);
+        },
+
+        async request(requestId = `REQ-$${Date.now()}`) {
+          const ids = await flowIds();
+          const res = await post(`$${WORKFLOW}/api/v1/webhooks/$${ids.intake}`, payload('request.json', requestId));
+          console.log(`request_id: $${requestId}  (intake webhook -> HTTP $${res.status})`);
+          console.log("waiting for the 'information required' message ...");
+          const notify = await waitForCall('/notify', requestId, 180);
+          if (!notify) {
+            throw new Error(
+              'no message within 180 s: the run stopped at a step. FlowOps -> Workflows -> Runs shows which one ' +
+                '(often "Classify request (AI agent)": no LLM provider / AI agent yet, see docker logs imbrace-examples-seed).',
+            );
+          }
+          show(notify);
+          console.log(`\nThe run is now waiting. Send the reply:  reply $${requestId}`);
+        },
+
+        async reply(requestId) {
+          if (!requestId) throw new Error('usage: reply <request_id>');
+          const ids = await flowIds();
+          const res = await post(`$${WORKFLOW}/api/v1/webhooks/$${ids.replyRouter}/sync`, payload('reply.json', requestId));
+          show(res.body);
+          console.log(`reply router -> HTTP $${res.status}$${res.status === 202 ? '' : ' (no run is waiting for this request_id)'}`);
+          if (res.status === 202) {
+            console.log(`\nApprove in the dashboard (FlowOps -> Workflows -> More -> Todos), or:  approve $${requestId}`);
+          }
+        },
+
+        async approve(requestId, decision = 'Approve') {
+          if (!requestId) throw new Error('usage: approve <request_id> [Approve|Reject]');
+          const task = await waitForCall('/approvals', requestId, 60);
+          if (!task) throw new Error(`no approval task for $${requestId} yet (send the reply first)`);
+          const link = task.links?.find((l) => l.name.toLowerCase() === decision.toLowerCase());
+          if (!link) throw new Error(`decision must be one of: $${task.links.map((l) => l.name).join(', ')}`);
+          const res = await fetch(viaWorkflow(link.url), { method: 'POST' });
+          console.log(`approval ($${link.name}) -> HTTP $${res.status}`);
+          console.log(`\nSee what the business system received:  result $${requestId}`);
+        },
+
+        async result(requestId) {
+          if (!requestId) throw new Error('usage: result <request_id>');
+          const done = await waitForCall('/business-system', requestId, 30);
+          if (done) {
+            console.log('business system received:');
+            show(done);
+            return;
+          }
+          const notes = await stubCalls('/notify', requestId);
+          const rejected = notes.find((c) => c.body?.approval);
+          if (rejected) {
+            console.log('rejected, the customer was told:');
+            show(rejected.body);
+          } else {
+            console.log(`nothing for $${requestId} yet: is it approved? (calls $${requestId} lists every stub call)`);
+          }
+        },
+
+        async calls(requestId) {
+          show(await stubCalls(null, requestId));
+        },
+
+        help() {
+          console.log(`customer-request example
+
+        request [request_id]           post a service request with missing fields; prints the
+                                       "information required" message (the run then waits)
+        reply   <request_id>           post the customer's reply: HTTP 202 resumed, 404 nothing waiting
+        approve <request_id> [Reject]  resolve the approval task (or use the Todos page)
+        result  <request_id>           what the business system received
+        calls   [request_id]           every call the stub recorded
+        urls                           the two webhook URLs, to call them yourself`);
+        },
+      };
+
+      const [name = 'help', ...args] = process.argv.slice(2);
+      const command = commands[name];
+      if (!command) {
+        console.error(`unknown command "$${name}"`);
+        commands.help();
+        process.exit(1);
+      }
+      Promise.resolve()
+        .then(() => command(...args))
+        .catch((e) => {
+          console.error(e.message);
+          process.exit(1);
+        });
+
+  # payloads/request.json
+  example-customer-request-payload-request:
+    content: |
+      {
+        "request_id": "__REQUEST_ID__",
+        "customer_name": "Lan Nguyen",
+        "email": "lan.nguyen@example.com",
+        "service": "Air conditioner repair",
+        "description": "The AC unit in the living room is leaking water onto the floor since yesterday."
+      }
+
+  # payloads/reply.json
+  example-customer-request-payload-reply:
+    content: |
+      {
+        "request_id": "__REQUEST_ID__",
+        "address": "12 Nguyen Hue, District 1, Ho Chi Minh City",
+        "preferred_date": "2026-10-08"
+      }
+
+  # <<< customer-request example
+
 volumes:
   pgdata:
   redis-data:
@@ -1681,6 +3095,7 @@ volumes:
   worker-codes:
   worker-cache:
   licenses:
+  example-stub-data:
 
 networks:
   imbrace-net:

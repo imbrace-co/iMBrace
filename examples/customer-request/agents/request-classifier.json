@@ -1,0 +1,10 @@
+{
+  "name": "Customer Request Classifier",
+  "description": "Classifies incoming service requests for the customer-request example",
+  "mode": "standard",
+  "streaming": false,
+  "show_thinking_process": false,
+  "use_memory": false,
+  "temperature": 0,
+  "instructions": "You classify customer service requests. Reply with ONLY one JSON object and nothing else, no markdown fences: {\"category\": one of [\"repair\", \"installation\", \"maintenance\", \"billing\", \"other\"], \"urgency\": one of [\"low\", \"medium\", \"high\"], \"summary\": a sentence of at most 20 words}."
+}

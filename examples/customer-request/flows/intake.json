@@ -1,0 +1,466 @@
+{
+  "displayName": "Customer request - intake",
+  "trigger": {
+    "name": "trigger",
+    "type": "PIECE_TRIGGER",
+    "valid": true,
+    "displayName": "Service request received",
+    "settings": {
+      "pieceName": "@activepieces/piece-webhook",
+      "pieceVersion": "0.1.24",
+      "triggerName": "catch_webhook",
+      "input": {
+        "authType": "none",
+        "authFields": {}
+      },
+      "propertySettings": {}
+    },
+    "nextAction": {
+      "name": "validate_request",
+      "type": "CODE",
+      "valid": true,
+      "displayName": "Validate request",
+      "settings": {
+        "input": {
+          "body": "{{trigger.body}}",
+          "contentType": "{{trigger.headers['content-type']}}"
+        },
+        "sourceCode": {
+          "code": "export const code = async (inputs) => {\n  const body = typeof inputs.body === 'string' ? (() => { try { return JSON.parse(inputs.body); } catch { return null; } })() : inputs.body;\n  if (!body || typeof body !== 'object' || !body.request_id) {\n    throw new Error('request_id is missing. Send a JSON body with header \"content-type: application/json\" (received content-type: ' + (inputs.contentType || 'none') + ').');\n  }\n  return { request_id: body.request_id };\n};",
+          "packageJson": "{}"
+        },
+        "errorHandlingOptions": {
+          "continueOnFailure": {
+            "value": false
+          },
+          "retryOnFailure": {
+            "value": false
+          }
+        }
+      },
+      "nextAction": {
+        "name": "run_info",
+        "type": "PIECE",
+        "valid": true,
+        "displayName": "Get run info",
+        "settings": {
+          "pieceName": "@activepieces/piece-flow-helper",
+          "pieceVersion": "0.0.10",
+          "actionName": "getRunId",
+          "input": {},
+          "propertySettings": {},
+          "errorHandlingOptions": {
+            "continueOnFailure": {
+              "value": false
+            },
+            "retryOnFailure": {
+              "value": false
+            }
+          }
+        },
+        "nextAction": {
+          "name": "tag_run",
+          "type": "PIECE",
+          "valid": true,
+          "displayName": "Tag run with request_id",
+          "settings": {
+            "pieceName": "@activepieces/piece-tags",
+            "pieceVersion": "0.0.12",
+            "actionName": "add_tag",
+            "input": {
+              "name": "request_id:{{trigger.body.request_id}}"
+            },
+            "propertySettings": {},
+            "errorHandlingOptions": {
+              "continueOnFailure": {
+                "value": false
+              },
+              "retryOnFailure": {
+                "value": false
+              }
+            }
+          },
+          "nextAction": {
+            "name": "classify",
+            "type": "PIECE",
+            "valid": true,
+            "displayName": "Classify request (AI agent)",
+            "settings": {
+              "pieceName": "@activepieces/piece-ai-connector",
+              "pieceVersion": "0.0.1",
+              "actionName": "assistant-request",
+              "input": {
+                "auth": "{{connections['imbrace-api-key']}}",
+                "assistant_id": "__CLASSIFIER_ASSISTANT_ID__",
+                "version": "v2",
+                "modelName": "Default",
+                "enableCustomPrompt": true,
+                "prompt": {
+                  "prompt": "Classify this customer service request. Reply with ONLY one JSON object and no other text: {\"category\": \"repair\" | \"installation\" | \"maintenance\" | \"billing\" | \"other\", \"urgency\": \"low\" | \"medium\" | \"high\", \"summary\": \"at most 20 words\"}\n\nService: {{trigger.body.service}}\nDescription: {{trigger.body.description}}"
+                },
+                "voiceMessage": false,
+                "enableSuggestions": false
+              },
+              "propertySettings": {},
+              "errorHandlingOptions": {
+                "continueOnFailure": {
+                  "value": false
+                },
+                "retryOnFailure": {
+                  "value": false
+                }
+              }
+            },
+            "nextAction": {
+              "name": "check_fields",
+              "type": "CODE",
+              "valid": true,
+              "displayName": "Check required fields",
+              "settings": {
+                "input": {
+                  "request": "{{trigger.body}}",
+                  "classification": "{{classify}}"
+                },
+                "sourceCode": {
+                  "code": "export const code = async (inputs) => {\n  const required = ['customer_name', 'email', 'address', 'preferred_date'];\n  const req = typeof inputs.request === 'string' ? JSON.parse(inputs.request) : inputs.request;\n  const missing = required.filter((f) => req?.[f] === undefined || req?.[f] === null || String(req[f]).trim() === '');\n  let classification = null;\n  try {\n    const text = String(inputs.classification ?? '');\n    classification = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));\n  } catch {\n    classification = { category: 'other', urgency: 'medium', summary: String(inputs.classification ?? '') };\n  }\n  return { missing, complete: missing.length === 0, classification };\n};",
+                  "packageJson": "{}"
+                },
+                "errorHandlingOptions": {
+                  "continueOnFailure": {
+                    "value": false
+                  },
+                  "retryOnFailure": {
+                    "value": false
+                  }
+                }
+              },
+              "nextAction": {
+                "name": "missing_info",
+                "type": "ROUTER",
+                "valid": true,
+                "displayName": "Information missing?",
+                "settings": {
+                  "branches": [
+                    {
+                      "branchName": "Missing fields",
+                      "branchType": "CONDITION",
+                      "conditions": [
+                        [
+                          {
+                            "firstValue": "{{check_fields.missing}}",
+                            "operator": "LIST_IS_NOT_EMPTY"
+                          }
+                        ]
+                      ]
+                    },
+                    {
+                      "branchName": "Complete",
+                      "branchType": "FALLBACK"
+                    }
+                  ],
+                  "executionType": "EXECUTE_FIRST_MATCH",
+                  "errorHandlingOptions": {
+                    "continueOnFailure": {
+                      "value": false
+                    },
+                    "retryOnFailure": {
+                      "value": false
+                    }
+                  }
+                },
+                "children": [
+                  {
+                    "name": "notify_customer",
+                    "type": "PIECE",
+                    "valid": true,
+                    "displayName": "Ask customer for missing information",
+                    "settings": {
+                      "pieceName": "@activepieces/piece-http",
+                      "pieceVersion": "0.9.1",
+                      "actionName": "send_request",
+                      "input": {
+                        "method": "POST",
+                        "url": "http://customer-request-stub:8080/notify",
+                        "headers": {},
+                        "queryParams": {},
+                        "authType": "NONE",
+                        "authFields": {},
+                        "body_type": "json",
+                        "body": {
+                          "data": {
+                            "request_id": "{{trigger.body.request_id}}",
+                            "run_id": "{{run_info.id}}",
+                            "missing_fields": "{{check_fields.missing}}",
+                            "classification": "{{check_fields.classification}}",
+                            "message": "Information required to process your request"
+                          }
+                        },
+                        "response_is_binary": false,
+                        "use_proxy": false,
+                        "failureMode": "retry_none"
+                      },
+                      "propertySettings": {},
+                      "errorHandlingOptions": {
+                        "continueOnFailure": {
+                          "value": false
+                        },
+                        "retryOnFailure": {
+                          "value": false
+                        }
+                      }
+                    },
+                    "nextAction": {
+                      "name": "wait_for_reply",
+                      "type": "PIECE",
+                      "valid": true,
+                      "displayName": "Wait for customer reply",
+                      "settings": {
+                        "pieceName": "@activepieces/piece-webhook",
+                        "pieceVersion": "0.1.24",
+                        "actionName": "wait_for_event",
+                        "input": {
+                          "key": "{{trigger.body.request_id}}"
+                        },
+                        "propertySettings": {},
+                        "errorHandlingOptions": {
+                          "continueOnFailure": {
+                            "value": false
+                          },
+                          "retryOnFailure": {
+                            "value": false
+                          }
+                        }
+                      }
+                    }
+                  },
+                  null
+                ],
+                "nextAction": {
+                  "name": "create_approval",
+                  "type": "PIECE",
+                  "valid": true,
+                  "displayName": "Create approval task",
+                  "settings": {
+                    "pieceName": "@activepieces/piece-todos",
+                    "pieceVersion": "0.0.12",
+                    "actionName": "createTodo",
+                    "input": {
+                      "title": "Approve service request {{trigger.body.request_id}}",
+                      "description": "Category: {{check_fields.classification.category}} ({{check_fields.classification.urgency}})\nSummary: {{check_fields.classification.summary}}\nService: {{trigger.body.service}}\nCustomer: {{trigger.body.customer_name}}\nRun: {{run_info.url}}",
+                      "statusOptions": [
+                        {
+                          "name": "Approve",
+                          "variant": "Positive (Green)",
+                          "continueFlow": true
+                        },
+                        {
+                          "name": "Reject",
+                          "variant": "Negative (Red)",
+                          "continueFlow": true
+                        }
+                      ]
+                    },
+                    "propertySettings": {},
+                    "errorHandlingOptions": {
+                      "continueOnFailure": {
+                        "value": false
+                      },
+                      "retryOnFailure": {
+                        "value": false
+                      }
+                    }
+                  },
+                  "nextAction": {
+                    "name": "publish_approval_links",
+                    "type": "PIECE",
+                    "valid": true,
+                    "displayName": "Publish approval links",
+                    "settings": {
+                      "pieceName": "@activepieces/piece-http",
+                      "pieceVersion": "0.9.1",
+                      "actionName": "send_request",
+                      "input": {
+                        "method": "POST",
+                        "url": "http://customer-request-stub:8080/approvals",
+                        "headers": {},
+                        "queryParams": {},
+                        "authType": "NONE",
+                        "authFields": {},
+                        "body_type": "json",
+                        "body": {
+                          "data": {
+                            "request_id": "{{trigger.body.request_id}}",
+                            "run_id": "{{run_info.id}}",
+                            "todo_id": "{{create_approval.id}}",
+                            "links": "{{create_approval.links}}"
+                          }
+                        },
+                        "response_is_binary": false,
+                        "use_proxy": false,
+                        "failureMode": "retry_none"
+                      },
+                      "propertySettings": {},
+                      "errorHandlingOptions": {
+                        "continueOnFailure": {
+                          "value": false
+                        },
+                        "retryOnFailure": {
+                          "value": false
+                        }
+                      }
+                    },
+                    "nextAction": {
+                      "name": "wait_for_approval",
+                      "type": "PIECE",
+                      "valid": true,
+                      "displayName": "Wait for approval",
+                      "settings": {
+                        "pieceName": "@activepieces/piece-todos",
+                        "pieceVersion": "0.0.12",
+                        "actionName": "wait_for_approval",
+                        "input": {
+                          "taskId": "{{create_approval.id}}"
+                        },
+                        "propertySettings": {},
+                        "errorHandlingOptions": {
+                          "continueOnFailure": {
+                            "value": false
+                          },
+                          "retryOnFailure": {
+                            "value": false
+                          }
+                        }
+                      },
+                      "nextAction": {
+                        "name": "approval_result",
+                        "type": "ROUTER",
+                        "valid": true,
+                        "displayName": "Approved?",
+                        "settings": {
+                          "branches": [
+                            {
+                              "branchName": "Approved",
+                              "branchType": "CONDITION",
+                              "conditions": [
+                                [
+                                  {
+                                    "firstValue": "{{wait_for_approval.status}}",
+                                    "operator": "TEXT_EXACTLY_MATCHES",
+                                    "secondValue": "Approve",
+                                    "caseSensitive": false
+                                  }
+                                ]
+                              ]
+                            },
+                            {
+                              "branchName": "Rejected",
+                              "branchType": "FALLBACK"
+                            }
+                          ],
+                          "executionType": "EXECUTE_FIRST_MATCH",
+                          "errorHandlingOptions": {
+                            "continueOnFailure": {
+                              "value": false
+                            },
+                            "retryOnFailure": {
+                              "value": false
+                            }
+                          }
+                        },
+                        "children": [
+                          {
+                            "name": "call_business_system",
+                            "type": "PIECE",
+                            "valid": true,
+                            "displayName": "Create ticket in business system",
+                            "settings": {
+                              "pieceName": "@activepieces/piece-http",
+                              "pieceVersion": "0.9.1",
+                              "actionName": "send_request",
+                              "input": {
+                                "method": "POST",
+                                "url": "http://customer-request-stub:8080/business-system",
+                                "headers": {},
+                                "queryParams": {},
+                                "authType": "NONE",
+                                "authFields": {},
+                                "body_type": "json",
+                                "body": {
+                                  "data": {
+                                    "request_id": "{{trigger.body.request_id}}",
+                                    "run_id": "{{run_info.id}}",
+                                    "request": "{{trigger.body}}",
+                                    "reply": "{{wait_for_reply.body}}",
+                                    "classification": "{{check_fields.classification}}",
+                                    "approval": "{{wait_for_approval.status}}"
+                                  }
+                                },
+                                "response_is_binary": false,
+                                "use_proxy": false,
+                                "failureMode": "retry_none"
+                              },
+                              "propertySettings": {},
+                              "errorHandlingOptions": {
+                                "continueOnFailure": {
+                                  "value": false
+                                },
+                                "retryOnFailure": {
+                                  "value": false
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "name": "notify_rejected",
+                            "type": "PIECE",
+                            "valid": true,
+                            "displayName": "Tell customer the request was rejected",
+                            "settings": {
+                              "pieceName": "@activepieces/piece-http",
+                              "pieceVersion": "0.9.1",
+                              "actionName": "send_request",
+                              "input": {
+                                "method": "POST",
+                                "url": "http://customer-request-stub:8080/notify",
+                                "headers": {},
+                                "queryParams": {},
+                                "authType": "NONE",
+                                "authFields": {},
+                                "body_type": "json",
+                                "body": {
+                                  "data": {
+                                    "request_id": "{{trigger.body.request_id}}",
+                                    "run_id": "{{run_info.id}}",
+                                    "message": "Your request was rejected",
+                                    "approval": "{{wait_for_approval.status}}"
+                                  }
+                                },
+                                "response_is_binary": false,
+                                "use_proxy": false,
+                                "failureMode": "retry_none"
+                              },
+                              "propertySettings": {},
+                              "errorHandlingOptions": {
+                                "continueOnFailure": {
+                                  "value": false
+                                },
+                                "retryOnFailure": {
+                                  "value": false
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "schemaVersion": null
+}
