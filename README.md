@@ -61,20 +61,32 @@ Every value below ships as a fixed default, so **every install shares it until y
 
 The Workflow keys `AP_ENCRYPTION_KEY` (encrypts stored connection credentials) and
 `AP_JWT_SECRET` (signs Workflow tokens) have **no default**: `docker compose up` refuses to
-start until they are in `.env`, and `./generate-env.sh` creates a random pair per install.
+start until they are in `.env`, and `sh generate-env.sh` creates a random pair per install.
 
 `docker compose down -v` deletes all data volumes irreversibly — back up `pgdata` first.
 
 ### Requirements
 
-- Docker Engine 24+ and **Docker Compose v2.23.1+** on one Linux host.
-- Recommended **8 cores / 24 GB RAM / 100 GB SSD** (the stack idles at ~7.5 GB RAM; too
-  little RAM shows up as OOM-kills or a frozen host, not as a clear error).
+Runs on **Linux** (`amd64` / `arm64`) and **macOS** (Apple Silicon or Intel) — every image
+is multi-arch, so Apple Silicon runs natively without emulation.
+
+| | Linux | macOS |
+|---|---|---|
+| Docker | Docker Engine 24+ with **Compose v2.23.1+** | Docker Desktop, OrbStack or Colima with **Compose v2.23.1+** |
+| Resources | Recommended **8 cores / 24 GB RAM / 100 GB SSD** | Same, but given to Docker's VM: **Settings → Resources**, at least 16–24 GB memory and a 100 GB disk image (the defaults are too small) |
+| Commands | Prefix `docker` with `sudo` unless your user is in the `docker` group | No `sudo` |
+| `PUBLIC_HOST` | The server's IP or domain | `localhost` for this Mac only, or its LAN IP (`ipconfig getifaddr en0`) for other machines — then allow Docker in the macOS firewall |
+
+- The stack idles at ~7.5 GB RAM; too little RAM shows up as OOM-kills or a frozen host,
+  not as a clear error.
 - Inbound ports `6868`, `30700`, `30040`, `30030`, `30050`.
 - No GPU: AI features use an **external** OpenAI-compatible endpoint
   (`VLLM_URL` / `LLM_PROVIDER` on `chat-ai` and `ai-agent`).
+- On a Mac used as a server, disable sleep — the stack stops while the Mac sleeps.
 
 ### Deploy
+
+The same commands work in a Linux shell and in the macOS Terminal (bash or zsh).
 
 ```bash
 mkdir imbrace && cd imbrace
