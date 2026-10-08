@@ -42,99 +42,88 @@ configured, send data outside your infrastructure.)
 
 ## Quick start — run iMBrace with Docker Compose
 
-The whole stack runs from one file: [`deploy/docker-compose.yml`](deploy/docker-compose.yml).
-Every sidecar config (nginx ×2, Garage, Postgres init) is inlined as a Compose `config`, so
-that single file *is* the deployment — 20 long-running containers plus 10 one-shot DB
-init/migrate jobs, from 20 distinct images. All images are public (`docker.io/imbraceco`),
-so no registry token is required.
+The whole stack is one file: [`deploy/docker-compose.yml`](deploy/docker-compose.yml) —
+20 containers plus 9 one-shot DB init jobs, all from public `docker.io/imbraceco` images
+(`amd64` + `arm64`, no registry token).
+
+### ⚠️ Default credentials — change them before exposing the stack
+
+Every value below ships as a fixed default, so **every install shares it until you change it**.
+
+| Credential | Default | Where to change it |
+|---|---|---|
+| Dashboard admin login | `admin@imbrace.co` / `ChangeMe@12345` | In the UI after first login (seeded once via `NEW_ORG_PASSWORD`) |
+| Postgres superuser + `imbrace` role | `changeme-postgres-pass` | `.env` → `POSTGRES_PASSWORD` — **before the first start** (afterwards it needs an `ALTER ROLE`) |
+| Redis | `imbrace-dev-redis-pass` | `.env` → `REDIS_PASSWORD` |
+| Workflow keys | fixed hex values | compose → `AP_ENCRYPTION_KEY`, `AP_JWT_SECRET`, `AP_WORKER_TOKEN` (a JWT signed with `AP_JWT_SECRET` — regenerate it together) |
+| Channel service | fixed hex value | compose → `JWT_SECRET` |
+| chat-ai | `imbrace2026` / fixed key | compose → `ENCRYPTION_SECRET_KEY`, `WEBUI_SECRET_KEY` |
+| DocIQ API key | `oss-dociq-key` | compose → `AI_SERVICE_V2_API_KEY` |
+| Garage S3 | fixed `rpc_secret` | compose → config `garage-config` |
+
+`docker compose down -v` deletes all data volumes irreversibly — back up `pgdata` first.
 
 ### Requirements
 
-Docker Engine 24+ and **Docker Compose v2.23.1+** (for inline `configs[].content`) on a
-single Linux host, sized for a production workload:
+- Docker Engine 24+ and **Docker Compose v2.23.1+** on one Linux host.
+- Recommended **8 cores / 24 GB RAM / 100 GB SSD** (the stack idles at ~7.5 GB RAM; too
+  little RAM shows up as OOM-kills or a frozen host, not as a clear error).
+- Inbound ports `6868`, `30700`, `30040`, `30030`, `30050`.
+- No GPU: AI features use an **external** OpenAI-compatible endpoint
+  (`VLLM_URL` / `LLM_PROVIDER` on `chat-ai` and `ai-agent`).
 
-| | Production | Notes |
-|---|---|---|
-| CPU | 8 cores (16 from ~50 concurrent users) | `amd64` or `arm64`. Steady state sits at ~1–2 cores; the peak is boot — 10 sequential init/migrate jobs, the Activepieces `nx` migration, and the pgvector index build. Workflow and RAG bursts are what consume the remaining headroom. |
-| RAM | 24 GB | ~7.5 GB at rest, ~14.5 GB under load, so 24 GB leaves room for concurrency spikes without OOM-kills. Largest consumers: `apworkflow-api` (`WORKER_AND_APP`) + `apworkflow-worker` ≈ 2–5 GB, Kafka at `-Xmx1g` ≈ 1.5 GB, `chat-ai` ≈ 1–1.5 GB. |
-| Disk | 100 GB SSD (NVMe preferred) | 11–16 GB of images (the three `apwf` tags share no layers, and both `postgres:18-alpine` and `pgvector/pgvector:pg18` are pulled); the rest is volumes that keep growing — Kafka retains 7 days of log, `worker-cache` grows per built piece, `pgdata` carries the pgvector embeddings. Postgres and pgvector are latency-sensitive, so put the Docker data root on SSD. |
-| GPU | not used | No GPU service ships in this file. The AI features expect an **external** OpenAI-compatible endpoint — see `VLLM_URL` / `LLM_PROVIDER` on `chat-ai` and `ai-agent`. |
-| Network | TLS terminator in front | Run the stack behind a reverse proxy / load balancer with your certificate and set `PUBLIC_SCHEME=https` + `WS_SCHEME=wss`. Expose only the ports you actually serve. |
-
-Nothing enforces these numbers — the file declares no `mem_limit` and no
-`deploy.resources`, so Docker will not stop you. Below them the stack still starts but runs
-degraded, and too little RAM surfaces as random OOM-kills rather than a clear error.
-
-Before going live, rotate every default credential and key (see the warning under
-[Configuration](#configuration)), and schedule backups of the `pgdata` and object-storage
-volumes — `docker compose down -v` deletes them irreversibly.
-
-### Install
+### Deploy
 
 ```bash
-# grab just the one file — no clone, no submodules
-curl -fsSLO https://raw.githubusercontent.com/imbrace-co/imbrace/main/deploy/docker-compose.yml
+mkdir imbrace && cd imbrace
+curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/docker-compose.yml
 
-# start everything (defaults to localhost)
-docker compose up -d
+cat > .env <<EOF
+PUBLIC_HOST=10.0.0.5            # IP/domain browsers use — no scheme, no port
+POSTGRES_PASSWORD=<strong-password>
+REDIS_PASSWORD=<strong-password>
+EOF
 
-# or point it at the address browsers will use
-PUBLIC_HOST=10.0.0.5 docker compose up -d
+docker compose pull
+docker compose up -d            # first start takes ~5 min
 ```
 
-Startup order is encoded in the file: each DB init job waits for Postgres to be healthy,
-every app waits for its init job to finish, the gateway waits for the backends, and the
-frontends wait for the gateway. One `up -d` is enough.
+Startup order is encoded in the file, so one `up -d` is enough.
+
+### Verify
 
 ```bash
-docker compose ps            # status
-docker compose logs -f app-gateway
-docker compose down          # stop
-docker compose down -v       # stop AND delete all data volumes
+docker compose ps               # *-db-init jobs: Exited (0); everything else: Up / healthy
+
+curl -s -X POST -H 'Content-Type: application/json'   -d '{"email":"admin@imbrace.co","password":"ChangeMe@12345"}'   http://<PUBLIC_HOST>:6868/api/platform/v1/login/authenticate     # returns a token
 ```
-
-### Configuration
-
-All values have defaults baked in, so a plain `up -d` works. Override with a `.env` file
-next to the compose file, or inline on the command line:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `PUBLIC_HOST` | `localhost` | Browser-facing IP/domain — no scheme, no port |
-| `PUBLIC_SCHEME` | `http` | `http` or `https` |
-| `WS_SCHEME` | `ws` | `ws` with http, `wss` with https |
-| `POSTGRES_PASSWORD` | `changeme-postgres-pass` | Postgres superuser **and** the `imbrace` app role |
-| `REDIS_PASSWORD` | `imbrace-dev-redis-pass` | Redis auth |
-| `GARAGE_KEY_ID` / `GARAGE_KEY_SECRET` | empty | S3 keys, filled after the optional Garage bootstrap |
-| `OPENAI_API_KEY` / `TAVILY_API_KEY` | empty | Optional external providers |
-
-> ⚠️ **Before exposing the stack to a network,** change the seeded admin password
-> (`NEW_ORG_PASSWORD`) and the JWT / encryption keys
-> (`AP_ENCRYPTION_KEY`, `AP_JWT_SECRET`, `AP_WORKER_TOKEN`, channel `JWT_SECRET`,
-> `WEBUI_SECRET_KEY`, `ENCRYPTION_SECRET_KEY`, Garage `rpc_secret`). They ship as fixed
-> defaults, which means **every** install shares them until you rotate.
-
-### Optional add-ons
-
-The AI features (`chat-ai`, `ai-agent`) need an OpenAI-compatible LLM endpoint, which this
-file does not ship. Point `VLLM_URL` / `VLLM_EMBEDDING_URL` at an external one, or switch
-`LLM_PROVIDER` to `openai` / `bedrock` and set the matching key. DocIQ additionally needs a
-reachable `docling-serve` in `DOCLING_SERVER_URL` — otherwise set `ENABLE_DOCIQ=false`.
-
-Object storage is optional too: services default to local disk. To use the bundled Garage
-S3 node, run the one-time bootstrap documented in the header of the compose file, then put
-the printed key id/secret into `.env` as `GARAGE_KEY_ID` / `GARAGE_KEY_SECRET`.
-
-### Access
 
 | URL | Content |
 |---|---|
-| `http://<PUBLIC_HOST>:6868` | Dashboard — login `admin@imbrace.co` / `ChangeMe@12345` |
-| `http://<PUBLIC_HOST>:6868/api` | app-gateway API |
+| `http://<PUBLIC_HOST>:6868` | Dashboard + `/api` gateway |
 | `http://<PUBLIC_HOST>:30700` | Workflow automation |
+| `http://<PUBLIC_HOST>:30040` | AI agent (Next Best Action) |
 | `http://<PUBLIC_HOST>:30030` | insightIQ AI chat |
 | `http://<PUBLIC_HOST>:30050` | Embeddable chat widget |
-| `http://<PUBLIC_HOST>:30040` | AI agent (Next Best Action) |
+
+### Configuration (`.env`)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PUBLIC_HOST` | `localhost` | Browser-facing IP/domain — **required** for anything but localhost |
+| `PUBLIC_SCHEME` / `WS_SCHEME` | `http` / `ws` | Set `https` / `wss` behind a TLS proxy |
+| `POSTGRES_PASSWORD` | `changeme-postgres-pass` | Postgres superuser and app role |
+| `REDIS_PASSWORD` | `imbrace-dev-redis-pass` | Redis auth |
+| `GARAGE_KEY_ID` / `GARAGE_KEY_SECRET` | empty | Garage S3 keys (optional bootstrap in the compose header) |
+| `OPENAI_API_KEY` / `TAVILY_API_KEY` | empty | Optional external providers |
+
+### Operate
+
+```bash
+docker compose logs -f <service>
+docker compose up -d            # after editing the file — only changed services restart
+docker compose down             # stop, keep data
+```
 
 ---
 

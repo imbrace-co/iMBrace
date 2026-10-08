@@ -193,7 +193,9 @@ services:
       IMBRACE_DB_USER: imbrace
       IMBRACE_DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # Postgres 18+ images keep data under /var/lib/postgresql/18/docker and
+      # refuse to start when a volume is mounted at the old .../data path.
+      - pgdata:/var/lib/postgresql
     configs:
       - source: postgres-initdb
         target: /docker-entrypoint-initdb.d/00-init.sh
@@ -331,7 +333,7 @@ services:
         echo "[init] done"
 
   platform-service:
-    image: docker.io/imbraceco/imbrace-platform:v0.0.3-3453eb3
+    image: docker.io/imbraceco/platform:v0.0.1-0b72c24
     container_name: imbrace-svc-platform-service
     restart: unless-stopped
     depends_on:
@@ -402,7 +404,7 @@ services:
         echo "[init] done"
 
   file-service:
-    image: docker.io/imbraceco/file:v0.0.4-6c2ede1
+    image: docker.io/imbraceco/file:v0.0.1-8aa725c
     container_name: imbrace-svc-file-service
     restart: unless-stopped
     depends_on:
@@ -467,7 +469,7 @@ services:
         echo "[init] done"
 
   channel-service:
-    image: docker.io/imbraceco/channel:v0.0.25-d32bd89
+    image: docker.io/imbraceco/channel:v0.0.1-d1ee5b0
     container_name: imbrace-svc-channel-service
     restart: unless-stopped
     depends_on:
@@ -593,7 +595,7 @@ services:
         echo "[init] done"
 
   data-board:
-    image: docker.io/imbraceco/data_board:v0.0.5-67b903e
+    image: docker.io/imbraceco/data_board:v0.0.1-27139b6
     container_name: imbrace-svc-data-board
     restart: unless-stopped
     depends_on:
@@ -697,7 +699,7 @@ services:
         echo "[init] done"
 
   marketplace:
-    image: docker.io/imbraceco/marketplace:v0.0.9-f0966c8
+    image: docker.io/imbraceco/marketplace:v0.0.1-f5cb480
     container_name: imbrace-svc-marketplace
     restart: unless-stopped
     depends_on:
@@ -786,7 +788,7 @@ services:
         echo "[init] done"
 
   chat-ai:
-    image: docker.io/imbraceco/chat-ai:v0.0.2-f31753f
+    image: docker.io/imbraceco/chat-ai:v0.0.1-8116aef
     container_name: imbrace-svc-chat-ai
     restart: unless-stopped
     depends_on:
@@ -910,7 +912,7 @@ services:
         echo "[init] done"
 
   ai-agent-db-migrate:
-    image: docker.io/imbraceco/ai-agent:v0.0.5-0aaf9aa
+    image: docker.io/imbraceco/ai-agent:v0.0.1-c9c524a
     restart: "no"
     depends_on:
       ai-agent-db-init:
@@ -920,7 +922,7 @@ services:
     networks: [imbrace-net]
 
   ai-agent:
-    image: docker.io/imbraceco/ai-agent:v0.0.5-0aaf9aa
+    image: docker.io/imbraceco/ai-agent:v0.0.1-c9c524a
     container_name: imbrace-svc-ai-agent
     restart: unless-stopped
     depends_on:
@@ -932,6 +934,14 @@ services:
         condition: service_healthy
     ports:
       - "30040:3000"
+    # The image's built-in healthcheck runs server/dist/healthcheck.js, which
+    # the image does not ship — probe the /health route instead.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     environment: *ai-agent-env
     volumes:
       - agent-files:/mnt/data/files/aiToolLoopAgent
@@ -945,8 +955,8 @@ services:
   # APWORKFLOW (Workflow)
   #   db-init    : role `imbrace` + database `apworkflowdb` (post-install hook
   #                parity: templates/apworkflow-db-init-job.yaml)
-  #   db-migrate : TypeORM migrations (apworkflowApi db-migrate init container)
-  #   api        : REST API + engine (AP_CONTAINER_TYPE=WORKER_AND_APP, :3000)
+  #   api        : REST API + engine (AP_CONTAINER_TYPE=WORKER_AND_APP, :3000);
+  #                runs its TypeORM migrations itself at boot
   #   app        : React SPA (nginx, :4200)
   #   worker     : flow engine (AP_CONTAINER_TYPE=WORKER, :3001)
   #   proxy      : combined NodePort proxy — host :30700 -> / (app) + /api (api)
@@ -981,29 +991,14 @@ services:
         SQL
         echo "[init] done"
 
-  apworkflow-db-migrate:
-    image: docker.io/imbraceco/apwf:dev-be-93efe14
-    restart: "no"
-    depends_on:
-      apworkflow-db-init:
-        condition: service_completed_successfully
-    environment:
-      NX_DAEMON: "false"
-      AP_DB_TYPE: POSTGRES
-      AP_POSTGRES_HOST: imbrace-svc-postgresql
-      AP_POSTGRES_PORT: "5432"
-      AP_POSTGRES_DATABASE: apworkflowdb
-      AP_POSTGRES_USERNAME: imbrace
-      AP_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme-postgres-pass}
-    command: ["/bin/sh", "-c", "echo '[migrate] running server-api:db-migrate ...' && npx nx run server-api:db-migrate && echo '[migrate] done'"]
-    networks: [imbrace-net]
-
+  # No separate migrate job: the production api bundle ships no Nx workspace
+  # and runs its TypeORM migrations itself at boot (migrationsRun: true).
   apworkflow-api:
-    image: docker.io/imbraceco/apwf:dev-be-93efe14
+    image: docker.io/imbraceco/apwf:dev-be-288ed0d
     container_name: imbrace-svc-apworkflow-api
     restart: unless-stopped
     depends_on:
-      apworkflow-db-migrate:
+      apworkflow-db-init:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -1084,7 +1079,7 @@ services:
           - imbrace-svc-apworkflow-api.imbrace-services
 
   apworkflow-app:
-    image: docker.io/imbraceco/apwf:dev-fe-3da8b95
+    image: docker.io/imbraceco/apwf:dev-fe-288ed0d
     container_name: imbrace-svc-apworkflow-app
     restart: unless-stopped
     environment:
@@ -1109,7 +1104,7 @@ services:
           - imbrace-svc-apworkflow-app.imbrace-services
 
   apworkflow-worker:
-    image: docker.io/imbraceco/apwf:dev-engine-9f677c6
+    image: docker.io/imbraceco/apwf:dev-engine-288ed0d
     container_name: imbrace-svc-apworkflow-worker
     restart: unless-stopped
     depends_on:
@@ -1208,7 +1203,7 @@ services:
   # ===========================================================================
 
   app-gateway:
-    image: docker.io/imbraceco/app-gateway:v0.0.10-319d3a1
+    image: docker.io/imbraceco/app-gateway:v0.0.1-838c5b1
     container_name: imbrace-svc-app-gateway
     restart: unless-stopped
     # The gateway wires its upstreams at startup (chart frontendRedeploy hook
@@ -1283,7 +1278,7 @@ services:
   # VARS (the OSS image writes its own env.json at startup). Served publicly at
   # <PUBLIC_HOST>:6868/ via the edge proxy.
   imbrace-fe:
-    image: docker.io/imbraceco/imbrace-fe:v0.0.15-f012f20
+    image: docker.io/imbraceco/imbrace-fe:v0.0.1-7ae0b9b
     container_name: imbrace-svc-imbrace-fe
     restart: unless-stopped
     depends_on:
@@ -1317,7 +1312,7 @@ services:
   # NodePort) so the dashboard's VITE_APP_INTERNAL_AI_CHAT_HOST is reachable
   # from the browser.
   insightiq:
-    image: docker.io/imbraceco/imbrace-ai-chatbot:v0.0.2-b860d6b
+    image: docker.io/imbraceco/imbrace-ai-chatbot:v0.0.1-e2b7137
     container_name: imbrace-svc-insightiq
     restart: unless-stopped
     depends_on:
@@ -1342,7 +1337,7 @@ services:
   # /usr/share/nginx/html/env, then runs /generate-env-json.sh (ECS task-def
   # parity). Published on host :30050 (chart NodePort).
   chat-widget:
-    image: docker.io/imbraceco/imbrace-chat-widget:v0.0.5-e310c76
+    image: docker.io/imbraceco/imbrace-chat-widget:v0.0.1-31062aa
     container_name: imbrace-svc-chat-widget
     restart: unless-stopped
     depends_on:
