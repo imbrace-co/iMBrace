@@ -55,47 +55,71 @@ Every value below ships as a fixed default, so **every install shares it until y
 | Dashboard admin login | `admin@imbrace.co` / `ChangeMe@12345` | In the UI after first login (seeded once via `NEW_ORG_PASSWORD`) |
 | Postgres superuser + `imbrace` role | `changeme-postgres-pass` | `.env` → `POSTGRES_PASSWORD` — **before the first start** (afterwards it needs an `ALTER ROLE`) |
 | Redis | `imbrace-dev-redis-pass` | `.env` → `REDIS_PASSWORD` |
-| Workflow keys | fixed hex values | compose → `AP_ENCRYPTION_KEY`, `AP_JWT_SECRET`, `AP_WORKER_TOKEN` (a JWT signed with `AP_JWT_SECRET` — regenerate it together) |
-| Channel service | fixed hex value | compose → `JWT_SECRET` |
 | chat-ai | `imbrace2026` / fixed key | compose → `ENCRYPTION_SECRET_KEY`, `WEBUI_SECRET_KEY` |
 | DocIQ API key | `oss-dociq-key` | compose → `AI_SERVICE_V2_API_KEY` |
 | Garage S3 | fixed `rpc_secret` | compose → config `garage-config` |
+
+The Workflow keys `AP_ENCRYPTION_KEY` (encrypts stored connection credentials) and
+`AP_JWT_SECRET` (signs Workflow tokens) have **no default**: `docker compose up` refuses to
+start until they are in `.env`, and `sh generate-env.sh` creates a random pair per install.
 
 `docker compose down -v` deletes all data volumes irreversibly — back up `pgdata` first.
 
 ### Requirements
 
-- Docker Engine 24+ and **Docker Compose v2.23.1+** on one Linux host.
-- Recommended **8 cores / 24 GB RAM / 100 GB SSD** (the stack idles at ~7.5 GB RAM; too
-  little RAM shows up as OOM-kills or a frozen host, not as a clear error).
+Runs on **Linux** (`amd64` / `arm64`) and **macOS** (Apple Silicon or Intel) — every image
+is multi-arch, so Apple Silicon runs natively without emulation.
+
+| | Linux | macOS |
+|---|---|---|
+| Docker | Docker Engine 24+ with **Compose v2.23.1+** | Docker Desktop, OrbStack or Colima with **Compose v2.23.1+** |
+| Resources | Recommended **8 cores / 24 GB RAM / 100 GB SSD** | Same, but given to Docker's VM: **Settings → Resources**, at least 16–24 GB memory and a 100 GB disk image (the defaults are too small) |
+| Commands | Prefix `docker` with `sudo` unless your user is in the `docker` group | No `sudo` |
+| `PUBLIC_HOST` | The server's IP or domain | `localhost` for this Mac only, or its LAN IP (`ipconfig getifaddr en0`) for other machines — then allow Docker in the macOS firewall |
+
+- The stack idles at ~7.5 GB RAM; too little RAM shows up as OOM-kills or a frozen host,
+  not as a clear error.
 - Inbound ports `6868`, `30700`, `30040`, `30030`, `30050`.
 - No GPU: AI features use an **external** OpenAI-compatible endpoint
   (`VLLM_URL` / `LLM_PROVIDER` on `chat-ai` and `ai-agent`).
+- On a Mac used as a server, disable sleep — the stack stops while the Mac sleeps.
 
 ### Deploy
+
+The same commands work in a Linux shell and in the macOS Terminal (bash or zsh).
 
 ```bash
 mkdir imbrace && cd imbrace
 curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/docker-compose.yml
+curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/generate-env.sh
 
+# PUBLIC_HOST = the IP/domain browsers use (no scheme, no port)
 cat > .env <<EOF
-PUBLIC_HOST=10.0.0.5            # IP/domain browsers use — no scheme, no port
-POSTGRES_PASSWORD=<strong-password>
-REDIS_PASSWORD=<strong-password>
+PUBLIC_HOST=10.0.0.5
+POSTGRES_PASSWORD=$(openssl rand -hex 16)
+REDIS_PASSWORD=$(openssl rand -hex 16)
 EOF
+sh generate-env.sh              # adds random AP_ENCRYPTION_KEY / AP_JWT_SECRET to .env
 
 docker compose pull
 docker compose up -d            # first start takes ~5 min
 ```
 
-Startup order is encoded in the file, so one `up -d` is enough.
+Startup order is encoded in the file, so one `up -d` is enough. Back up `.env`: losing
+`AP_ENCRYPTION_KEY` makes stored Workflow connections unrecoverable.
+
+> **Upgrading an install made from an earlier `docker-compose.yml`?** Do not run
+> `generate-env.sh` — copy the `AP_ENCRYPTION_KEY` and `AP_JWT_SECRET` values from your old
+> file into `.env` instead, so existing connections still decrypt.
 
 ### Verify
 
 ```bash
 docker compose ps               # *-db-init jobs: Exited (0); everything else: Up / healthy
 
-curl -s -X POST -H 'Content-Type: application/json'   -d '{"email":"admin@imbrace.co","password":"ChangeMe@12345"}'   http://<PUBLIC_HOST>:6868/api/platform/v1/login/authenticate     # returns a token
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"email":"admin@imbrace.co","password":"ChangeMe@12345"}' \
+  http://<PUBLIC_HOST>:6868/api/platform/v1/login/authenticate     # returns a token
 ```
 
 | URL | Content |
