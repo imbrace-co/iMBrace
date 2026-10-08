@@ -81,10 +81,11 @@ mkdir imbrace && cd imbrace
 curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/docker-compose.yml
 curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/generate-env.sh
 
+# PUBLIC_HOST = the IP/domain browsers use (no scheme, no port)
 cat > .env <<EOF
-PUBLIC_HOST=10.0.0.5            # IP/domain browsers use — no scheme, no port
-POSTGRES_PASSWORD=<strong-password>
-REDIS_PASSWORD=<strong-password>
+PUBLIC_HOST=10.0.0.5
+POSTGRES_PASSWORD=$(openssl rand -hex 16)
+REDIS_PASSWORD=$(openssl rand -hex 16)
 EOF
 sh generate-env.sh              # adds random AP_ENCRYPTION_KEY / AP_JWT_SECRET to .env
 
@@ -104,7 +105,9 @@ Startup order is encoded in the file, so one `up -d` is enough. Back up `.env`: 
 ```bash
 docker compose ps               # *-db-init jobs: Exited (0); everything else: Up / healthy
 
-curl -s -X POST -H 'Content-Type: application/json'   -d '{"email":"admin@imbrace.co","password":"ChangeMe@12345"}'   http://<PUBLIC_HOST>:6868/api/platform/v1/login/authenticate     # returns a token
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"email":"admin@imbrace.co","password":"ChangeMe@12345"}' \
+  http://<PUBLIC_HOST>:6868/api/platform/v1/login/authenticate     # returns a token
 ```
 
 | URL | Content |
