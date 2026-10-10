@@ -43,8 +43,8 @@ configured, send data outside your infrastructure.)
 ## Quick start — run iMBrace with Docker Compose
 
 The whole stack is one file: [`deploy/docker-compose.yml`](deploy/docker-compose.yml) —
-20 containers plus 9 one-shot DB init jobs, all from public `docker.io/imbraceco` images
-(`amd64` + `arm64`, no registry token).
+21 containers plus 10 one-shot jobs (9 DB inits and the example seed), all from public
+`docker.io/imbraceco` images and official base images (`amd64` + `arm64`, no registry token).
 
 ### ⚠️ Default credentials — change them before exposing the stack
 
@@ -56,7 +56,7 @@ Every value below ships as a fixed default, so **every install shares it until y
 | Postgres superuser + `imbrace` role | `changeme-postgres-pass` | `.env` → `POSTGRES_PASSWORD` — **before the first start** (afterwards it needs an `ALTER ROLE`) |
 | Redis | `imbrace-dev-redis-pass` | `.env` → `REDIS_PASSWORD` |
 | chat-ai | `imbrace2026` / fixed key | compose → `ENCRYPTION_SECRET_KEY`, `WEBUI_SECRET_KEY` |
-| DocIQ API key | `oss-dociq-key` | compose → `AI_SERVICE_V2_API_KEY` |
+| ai-agent → chat-ai service key | `oss-dociq-key` | `.env` → `INTERNAL_SERVICE_KEY` (lets ai-agent read unmasked LLM provider keys) |
 | Garage S3 | fixed `rpc_secret` | compose → config `garage-config` |
 
 The Workflow keys `AP_ENCRYPTION_KEY` (encrypts stored connection credentials) and
@@ -93,9 +93,9 @@ mkdir imbrace && cd imbrace
 curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/docker-compose.yml
 curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/generate-env.sh
 
-# PUBLIC_HOST = the IP/domain browsers use (no scheme, no port)
-cat > .env <<EOF
-PUBLIC_HOST=10.0.0.5
+# First install only: random database passwords. The [ -f .env ] guard keeps an existing
+# .env, because a new POSTGRES_PASSWORD no longer matches the initialized database.
+[ -f .env ] || cat > .env <<EOF
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 REDIS_PASSWORD=$(openssl rand -hex 16)
 EOF
@@ -104,6 +104,10 @@ sh generate-env.sh              # adds random AP_ENCRYPTION_KEY / AP_JWT_SECRET 
 docker compose pull
 docker compose up -d            # first start takes ~5 min
 ```
+
+`PUBLIC_HOST` defaults to `localhost`, which is enough when the browser runs on the same
+machine. To reach the stack from other machines, add the IP or domain browsers use (no
+scheme, no port) to `.env` before `up`, e.g. `echo PUBLIC_HOST=10.0.0.5 >> .env`.
 
 Startup order is encoded in the file, so one `up -d` is enough. Back up `.env`: losing
 `AP_ENCRYPTION_KEY` makes stored Workflow connections unrecoverable.
@@ -130,14 +134,69 @@ curl -s -X POST -H 'Content-Type: application/json' \
 | `http://<PUBLIC_HOST>:30030` | insightIQ AI chat |
 | `http://<PUBLIC_HOST>:30050` | Embeddable chat widget |
 
+### Try the example: two workflows that work together
+
+The first `up -d` also installs the **customer-request** example
+([`examples/customer-request`](examples/customer-request)): the one-shot `examples-seed`
+service imports and enables two flows, and `customer-request-stub` (on `127.0.0.1:30800`)
+stands in for the customer and the business system.
+
+| Flow (FlowOps → Workflows) | Started by | What it does |
+|---|---|---|
+| **Customer request - intake** | a service request with a `request_id` | An AI agent classifies it, a code step finds the missing fields, the customer is asked for them, then the run **waits** (*Wait for Event*, key = `request_id`). After the reply it creates an approval task on the **Todos** page and, once approved, calls the business system. |
+| **Customer request - reply router** | the customer's reply with the same `request_id` | *Resume Waiting Run*, key = `request_id`: hands the reply to the intake run waiting on that id, which carries on, and answers `202 resumed` — or `404 no waiting request` when no run waits on it. |
+
+The `request_id` is the only link between the two flows. The waiting run is stored in
+Postgres (no polling), so it survives `docker compose restart`, and a second reply for the
+same id gets a `404` instead of resuming the run twice.
+
+```
+request ─► intake: classify ─ check fields ─ ask customer ─ ⏸ wait (request_id) ···▶ approval ⏸ ···▶ business system
+reply ───► reply router: resume the run waiting on request_id ─────┘   (202 resumed / 404 nothing waiting)
+```
+
+**1. Give the example an AI model.** Dashboard → **LLM Provider** → add a provider (the
+example is tested with Amazon Bedrock; for another type set `CLASSIFIER_PROVIDER_TYPE` /
+`CLASSIFIER_MODEL` in `.env` first). Within 30 seconds the seed creates the AI agent
+*Customer Request Classifier*, points the intake flow at it and exits:
+
+```bash
+docker compose logs examples-seed     # last line: "customer-request example is ready"
+```
+
+**2. Run both flows** — in the folder with `docker-compose.yml`, from bash, zsh, cmd or
+PowerShell; nothing to install besides Docker. Use the same `request_id` in every step:
+
+```bash
+docker compose run --rm examples request REQ-1001   # intake: prints "Information required ..." and the AI classification; the run now waits
+docker compose run --rm examples reply   REQ-1001   # reply router: HTTP 202 "resumed" (again: 404, nothing waits any more)
+docker compose run --rm examples approve REQ-1001   # or Todos page → "Approve service request REQ-1001" → Mark as Approve
+docker compose run --rm examples result  REQ-1001   # what the business system received: request, reply, classification, approval — one run_id
+```
+
+FlowOps → Workflows → **Runs** shows the intake run (*Paused* while it waits) with the
+input and output of every step, and one reply router run per reply. `approve REQ-1001 Reject`
+takes the rejection path instead.
+
+To call the webhooks yourself, `docker compose run --rm examples urls` prints both URLs.
+Send JSON with `content-type: application/json`: the request needs `request_id` (the example
+treats `customer_name`, `email`, `address` and `preferred_date` as required), the reply the same
+`request_id` plus the missing fields; add `/sync` to the reply router URL to get its
+`202` / `404` answer. `SEED_EXAMPLES=false` in `.env` skips the example. More (bash scripts,
+acceptance test, editing the flows): [`examples/customer-request/README.md`](examples/customer-request/README.md).
+
 ### Configuration (`.env`)
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `PUBLIC_HOST` | `localhost` | Browser-facing IP/domain — **required** for anything but localhost |
 | `PUBLIC_SCHEME` / `WS_SCHEME` | `http` / `ws` | Set `https` / `wss` behind a TLS proxy |
+| `AP_ENCRYPTION_KEY` / `AP_JWT_SECRET` | none — **required** | Workflow keys, written by `sh generate-env.sh` |
 | `POSTGRES_PASSWORD` | `changeme-postgres-pass` | Postgres superuser and app role |
 | `REDIS_PASSWORD` | `imbrace-dev-redis-pass` | Redis auth |
+| `INTERNAL_SERVICE_KEY` | `oss-dociq-key` | Shared by ai-agent and chat-ai; other callers only see masked LLM provider keys |
+| `SEED_EXAMPLES` | `true` | `false` skips installing the example workflows |
+| `CLASSIFIER_PROVIDER_TYPE` / `CLASSIFIER_MODEL` | `bedrock` / `qwen.qwen3-32b-v1:0` | LLM provider type and model of the example's AI agent |
 | `GARAGE_KEY_ID` / `GARAGE_KEY_SECRET` | empty | Garage S3 keys (optional bootstrap in the compose header) |
 | `OPENAI_API_KEY` / `TAVILY_API_KEY` | empty | Optional external providers |
 
