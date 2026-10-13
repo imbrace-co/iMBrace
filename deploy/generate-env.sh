@@ -16,6 +16,21 @@
 #                      symbol, and no $ or # (both special in .env / compose)
 #   platform-service only applies these when it first creates the org; changing
 #   them in .env afterwards does not change the existing admin's password.
+#
+# Service secrets (all 64 hex chars, openssl rand -hex 32):
+#   INTERNAL_SERVICE_KEY          ai-agent -> chat-ai key (unmasked provider
+#                                 credentials and DocIQ); safe to rotate
+#   CHATAI_ENCRYPTION_SECRET_KEY  encrypts chat-ai's stored LLM provider configs —
+#                                 replacing it makes them undecryptable
+#   CHATAI_WEBUI_SECRET_KEY       signs chat-ai sessions — replacing it signs
+#                                 everyone out
+#   GARAGE_RPC_SECRET             Garage (S3) rpc_secret
+#
+# Upgrading an install that ran the earlier compose file (fixed values)? Put the
+# old values into .env BEFORE running this script, so existing data still works:
+#   ADMIN_PASSWORD=ChangeMe@12345
+#   CHATAI_ENCRYPTION_SECRET_KEY=imbrace2026
+#   CHATAI_WEBUI_SECRET_KEY=Ga9fImSJMCx5d9qLkRNwCQJ9I//573YWZ0zcl34n8pU=
 set -eu
 
 cd "$(dirname "$0")"
@@ -45,6 +60,10 @@ add_if_missing AP_ENCRYPTION_KEY "$(rand_hex 16)"
 add_if_missing AP_JWT_SECRET "$(rand_hex 32)"
 add_if_missing ADMIN_EMAIL "${ADMIN_EMAIL:-admin@imbrace.co}"
 add_if_missing ADMIN_PASSWORD "Im$(rand_hex 8)@1"
+add_if_missing INTERNAL_SERVICE_KEY "$(rand_hex 32)"
+add_if_missing CHATAI_ENCRYPTION_SECRET_KEY "$(rand_hex 32)"
+add_if_missing CHATAI_WEBUI_SECRET_KEY "$(rand_hex 32)"
+add_if_missing GARAGE_RPC_SECRET "$(rand_hex 32)"
 
 echo
 echo "Dashboard login: $(sed -n 's/^ADMIN_EMAIL=//p' "$ENV_FILE") / $(sed -n 's/^ADMIN_PASSWORD=//p' "$ENV_FILE")"

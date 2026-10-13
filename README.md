@@ -46,24 +46,24 @@ The whole stack is one file: [`deploy/docker-compose.yml`](deploy/docker-compose
 21 containers plus 10 one-shot jobs (9 DB inits and the example seed), all from public
 `docker.io/imbraceco` images and official base images (`amd64` + `arm64`, no registry token).
 
-### ⚠️ Default credentials — change them before exposing the stack
+### ⚠️ Credentials — what is generated, what is still a fixed default
 
-Except the dashboard admin password, every value below ships as a fixed default, so **every
-install shares it until you change it**.
+`sh generate-env.sh` writes a random value per install into `.env` for every secret below
+except Postgres and Redis. `docker compose up` refuses to start until they are there.
 
 | Credential | Default | Where to change it |
 |---|---|---|
-| Dashboard admin login | `admin@imbrace.co` / random per install | `.env` → `ADMIN_EMAIL` / `ADMIN_PASSWORD`, written by `sh generate-env.sh` — **before the first start** (the admin is seeded once; if you later change the password in the UI, put the new one in `.env` too — the example seed logs in with it) |
-| Postgres superuser + `imbrace` role | `changeme-postgres-pass` | `.env` → `POSTGRES_PASSWORD` — **before the first start** (afterwards it needs an `ALTER ROLE`) |
-| Redis | `imbrace-dev-redis-pass` | `.env` → `REDIS_PASSWORD` |
-| chat-ai | `imbrace2026` / fixed key | compose → `ENCRYPTION_SECRET_KEY`, `WEBUI_SECRET_KEY` |
-| ai-agent → chat-ai service key | `oss-dociq-key` | `.env` → `INTERNAL_SERVICE_KEY` (lets ai-agent read unmasked LLM provider keys) |
-| Garage S3 | fixed `rpc_secret` | compose → config `garage-config` |
+| Dashboard admin login | `admin@imbrace.co` / random per install | `.env` → `ADMIN_EMAIL` / `ADMIN_PASSWORD` — **before the first start** (the admin is seeded once; if you later change the password in the UI, put the new one in `.env` too — the example seed logs in with it) |
+| Workflow keys | random per install | `.env` → `AP_ENCRYPTION_KEY` (encrypts stored connection credentials), `AP_JWT_SECRET` (signs Workflow tokens) |
+| chat-ai keys | random per install | `.env` → `CHATAI_ENCRYPTION_SECRET_KEY` (encrypts stored LLM provider configs), `CHATAI_WEBUI_SECRET_KEY` (signs sessions) |
+| ai-agent → chat-ai service key | random per install | `.env` → `INTERNAL_SERVICE_KEY` (lets ai-agent read unmasked LLM provider keys and call DocIQ) |
+| Garage S3 | random per install | `.env` → `GARAGE_RPC_SECRET` |
+| Postgres superuser + `imbrace` role | `changeme-postgres-pass` — **fixed** | `.env` → `POSTGRES_PASSWORD` — **before the first start** (afterwards it needs an `ALTER ROLE`) |
+| Redis | `imbrace-dev-redis-pass` — **fixed** | `.env` → `REDIS_PASSWORD` |
 
-The Workflow keys `AP_ENCRYPTION_KEY` (encrypts stored connection credentials) and
-`AP_JWT_SECRET` (signs Workflow tokens) have **no default**: `docker compose up` refuses to
-start until they are in `.env`, and `sh generate-env.sh` creates a random pair per install —
-together with the dashboard admin password (`ADMIN_PASSWORD`), which it prints at the end.
+Do not replace `AP_ENCRYPTION_KEY` or `CHATAI_ENCRYPTION_SECRET_KEY` on a running install:
+stored Workflow connections / LLM provider configs become undecryptable. The script never
+overwrites a key that is already in `.env`, and prints the dashboard login at the end.
 
 `docker compose down -v` deletes all data volumes irreversibly — back up `pgdata` first.
 
@@ -101,8 +101,8 @@ curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/gen
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 REDIS_PASSWORD=$(openssl rand -hex 16)
 EOF
-sh generate-env.sh              # adds random AP_ENCRYPTION_KEY / AP_JWT_SECRET + ADMIN_PASSWORD to .env
-                                # and prints the dashboard login (ADMIN_EMAIL=you@x sh ... for another email)
+sh generate-env.sh              # adds the random per-install keys + ADMIN_PASSWORD to .env and prints
+                                # the dashboard login (ADMIN_EMAIL=you@x sh ... for another email)
 
 docker compose pull
 docker compose up -d            # first start takes ~5 min
@@ -117,13 +117,24 @@ domain browsers use (no scheme, no port) to `.env` before `up`, e.g.
 `echo PUBLIC_HOST=10.0.0.5 >> .env`.
 
 Startup order is encoded in the file, so one `up -d` is enough. Back up `.env`: losing
-`AP_ENCRYPTION_KEY` makes stored Workflow connections unrecoverable.
+`AP_ENCRYPTION_KEY` makes stored Workflow connections unrecoverable, losing
+`CHATAI_ENCRYPTION_SECRET_KEY` does the same to the LLM provider configs.
 
-> **Upgrading an install made from an earlier `docker-compose.yml`?** Do not run
-> `generate-env.sh` — copy the `AP_ENCRYPTION_KEY` and `AP_JWT_SECRET` values from your old
-> file into `.env` instead, so existing connections still decrypt. Also add
-> `ADMIN_PASSWORD=ChangeMe@12345` (the admin password that file seeded, or whatever you changed
-> it to) — the admin already exists, so a newly generated password would not match it.
+> **Upgrading an install made from an earlier `docker-compose.yml`?** Before running
+> `generate-env.sh`, put the values your install already uses into `.env`, so existing data
+> still decrypts and the existing admin still logs in — the script then only fills in the rest
+> (`INTERNAL_SERVICE_KEY`, `GARAGE_RPC_SECRET`, which are safe to replace):
+>
+> ```bash
+> # plus AP_ENCRYPTION_KEY / AP_JWT_SECRET from the old .env (or old compose file)
+> cat >> .env <<'EOF'
+> ADMIN_PASSWORD=ChangeMe@12345
+> CHATAI_ENCRYPTION_SECRET_KEY=imbrace2026
+> CHATAI_WEBUI_SECRET_KEY=Ga9fImSJMCx5d9qLkRNwCQJ9I//573YWZ0zcl34n8pU=
+> EOF
+> ```
+>
+> Use the admin password you changed it to, if you did.
 
 ### Verify
 
@@ -205,7 +216,9 @@ acceptance test, editing the flows): [`examples/customer-request/README.md`](exa
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@imbrace.co` / none — **required** | Dashboard admin, seeded on the first start only; written by `sh generate-env.sh` |
 | `POSTGRES_PASSWORD` | `changeme-postgres-pass` | Postgres superuser and app role |
 | `REDIS_PASSWORD` | `imbrace-dev-redis-pass` | Redis auth |
-| `INTERNAL_SERVICE_KEY` | `oss-dociq-key` | Shared by ai-agent and chat-ai; other callers only see masked LLM provider keys |
+| `INTERNAL_SERVICE_KEY` | none — **required** | Shared by ai-agent and chat-ai (also DocIQ's API key); other callers only see masked LLM provider keys. Written by `sh generate-env.sh` |
+| `CHATAI_ENCRYPTION_SECRET_KEY` / `CHATAI_WEBUI_SECRET_KEY` | none — **required** | chat-ai provider-config encryption / session signing; written by `sh generate-env.sh` |
+| `GARAGE_RPC_SECRET` | none — **required** | Garage `rpc_secret` (64 hex chars); written by `sh generate-env.sh` |
 | `SEED_EXAMPLES` | `true` | `false` skips installing the example workflows |
 | `CLASSIFIER_PROVIDER_TYPE` / `CLASSIFIER_MODEL` | `bedrock` / `qwen.qwen3-32b-v1:0` | LLM provider type and model of the example's AI agent |
 | `GARAGE_KEY_ID` / `GARAGE_KEY_SECRET` | empty | Garage S3 keys (optional bootstrap in the compose header) |
