@@ -26,7 +26,7 @@ const STATE_ONLY = flags.has('--state-only');
 const GATEWAY = env('IMBRACE_API', 'http://127.0.0.1:6868/api');
 const WORKFLOW_PUBLIC = env('WORKFLOW_URL', 'http://127.0.0.1:30700');
 const EMAIL = env('IMBRACE_EMAIL', 'admin@imbrace.co');
-const PASSWORD = env('IMBRACE_PASSWORD', 'ChangeMe@12345');
+const PASSWORD = env('IMBRACE_PASSWORD', '');
 
 const CLASSIFIER_PROVIDER_TYPE = env('CLASSIFIER_PROVIDER_TYPE', 'bedrock');
 const CLASSIFIER_MODEL = env('CLASSIFIER_MODEL', 'qwen.qwen3-32b-v1:0');

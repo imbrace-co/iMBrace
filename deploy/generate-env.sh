@@ -9,6 +9,13 @@
 # Formats follow https://www.activepieces.com/docs/install/configuration/environment-variables
 #   AP_ENCRYPTION_KEY  32 hex chars (16 bytes)  — openssl rand -hex 16
 #   AP_JWT_SECRET      64 hex chars (32 bytes)  — openssl rand -hex 32
+#
+# Dashboard admin (platform-service NEW_ORG_USERNAME / NEW_ORG_PASSWORD):
+#   ADMIN_EMAIL        defaults to admin@imbrace.co (override: ADMIN_EMAIL=you@x sh generate-env.sh)
+#   ADMIN_PASSWORD     "Im" + 16 hex chars + "@1" — upper, lower, digit and
+#                      symbol, and no $ or # (both special in .env / compose)
+#   platform-service only applies these when it first creates the org; changing
+#   them in .env afterwards does not change the existing admin's password.
 set -eu
 
 cd "$(dirname "$0")"
@@ -36,5 +43,9 @@ add_if_missing() {
 
 add_if_missing AP_ENCRYPTION_KEY "$(rand_hex 16)"
 add_if_missing AP_JWT_SECRET "$(rand_hex 32)"
+add_if_missing ADMIN_EMAIL "${ADMIN_EMAIL:-admin@imbrace.co}"
+add_if_missing ADMIN_PASSWORD "Im$(rand_hex 8)@1"
 
+echo
+echo "Dashboard login: $(sed -n 's/^ADMIN_EMAIL=//p' "$ENV_FILE") / $(sed -n 's/^ADMIN_PASSWORD=//p' "$ENV_FILE")"
 echo "Done. Keep $ENV_FILE private and back it up — it cannot be regenerated."

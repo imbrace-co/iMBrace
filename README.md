@@ -48,11 +48,12 @@ The whole stack is one file: [`deploy/docker-compose.yml`](deploy/docker-compose
 
 ### ⚠️ Default credentials — change them before exposing the stack
 
-Every value below ships as a fixed default, so **every install shares it until you change it**.
+Except the dashboard admin password, every value below ships as a fixed default, so **every
+install shares it until you change it**.
 
 | Credential | Default | Where to change it |
 |---|---|---|
-| Dashboard admin login | `admin@imbrace.co` / `ChangeMe@12345` | In the UI after first login (seeded once via `NEW_ORG_PASSWORD`) |
+| Dashboard admin login | `admin@imbrace.co` / random per install | `.env` → `ADMIN_EMAIL` / `ADMIN_PASSWORD`, written by `sh generate-env.sh` — **before the first start** (the admin is seeded once; if you later change the password in the UI, put the new one in `.env` too — the example seed logs in with it) |
 | Postgres superuser + `imbrace` role | `changeme-postgres-pass` | `.env` → `POSTGRES_PASSWORD` — **before the first start** (afterwards it needs an `ALTER ROLE`) |
 | Redis | `imbrace-dev-redis-pass` | `.env` → `REDIS_PASSWORD` |
 | chat-ai | `imbrace2026` / fixed key | compose → `ENCRYPTION_SECRET_KEY`, `WEBUI_SECRET_KEY` |
@@ -61,7 +62,8 @@ Every value below ships as a fixed default, so **every install shares it until y
 
 The Workflow keys `AP_ENCRYPTION_KEY` (encrypts stored connection credentials) and
 `AP_JWT_SECRET` (signs Workflow tokens) have **no default**: `docker compose up` refuses to
-start until they are in `.env`, and `sh generate-env.sh` creates a random pair per install.
+start until they are in `.env`, and `sh generate-env.sh` creates a random pair per install —
+together with the dashboard admin password (`ADMIN_PASSWORD`), which it prints at the end.
 
 `docker compose down -v` deletes all data volumes irreversibly — back up `pgdata` first.
 
@@ -99,7 +101,8 @@ curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/gen
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 REDIS_PASSWORD=$(openssl rand -hex 16)
 EOF
-sh generate-env.sh              # adds random AP_ENCRYPTION_KEY / AP_JWT_SECRET to .env
+sh generate-env.sh              # adds random AP_ENCRYPTION_KEY / AP_JWT_SECRET + ADMIN_PASSWORD to .env
+                                # and prints the dashboard login (ADMIN_EMAIL=you@x sh ... for another email)
 
 docker compose pull
 docker compose up -d            # first start takes ~5 min
@@ -118,15 +121,18 @@ Startup order is encoded in the file, so one `up -d` is enough. Back up `.env`: 
 
 > **Upgrading an install made from an earlier `docker-compose.yml`?** Do not run
 > `generate-env.sh` — copy the `AP_ENCRYPTION_KEY` and `AP_JWT_SECRET` values from your old
-> file into `.env` instead, so existing connections still decrypt.
+> file into `.env` instead, so existing connections still decrypt. Also add
+> `ADMIN_PASSWORD=ChangeMe@12345` (the admin password that file seeded, or whatever you changed
+> it to) — the admin already exists, so a newly generated password would not match it.
 
 ### Verify
 
 ```bash
 docker compose ps               # *-db-init jobs: Exited (0); everything else: Up / healthy
 
+. ./.env                        # loads ADMIN_EMAIL / ADMIN_PASSWORD
 curl -s -X POST -H 'Content-Type: application/json' \
-  -d '{"email":"admin@imbrace.co","password":"ChangeMe@12345"}' \
+  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" \
   http://<PUBLIC_HOST>:6868/api/platform/v1/login/authenticate     # returns a token
 ```
 
@@ -196,6 +202,7 @@ acceptance test, editing the flows): [`examples/customer-request/README.md`](exa
 | `PUBLIC_HOST` | `localhost` | Browser-facing IP/domain. Unset: use `localhost` or `127.0.0.1` on the same machine (`127.0.0.1` for the widget full page needs `PUBLIC_HOST=127.0.0.1`) — **required** for any other machine |
 | `PUBLIC_SCHEME` / `WS_SCHEME` | `http` / `ws` | Set `https` / `wss` behind a TLS proxy |
 | `AP_ENCRYPTION_KEY` / `AP_JWT_SECRET` | none — **required** | Workflow keys, written by `sh generate-env.sh` |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@imbrace.co` / none — **required** | Dashboard admin, seeded on the first start only; written by `sh generate-env.sh` |
 | `POSTGRES_PASSWORD` | `changeme-postgres-pass` | Postgres superuser and app role |
 | `REDIS_PASSWORD` | `imbrace-dev-redis-pass` | Redis auth |
 | `INTERNAL_SERVICE_KEY` | `oss-dociq-key` | Shared by ai-agent and chat-ai; other callers only see masked LLM provider keys |

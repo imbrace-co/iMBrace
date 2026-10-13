@@ -14,7 +14,7 @@ const env = (k, d) => process.env[k] ?? d;
 
 const GATEWAY = env('IMBRACE_API', 'http://127.0.0.1:6868/api');
 const EMAIL = env('IMBRACE_EMAIL', 'admin@imbrace.co');
-const PASSWORD = env('IMBRACE_PASSWORD', 'ChangeMe@12345');
+const PASSWORD = env('IMBRACE_PASSWORD', '');
 // Where this script reaches the workflow webhooks and the stub, and the public webhook base it prints.
 const WORKFLOW = env('WORKFLOW_INTERNAL_URL', env('WORKFLOW_URL', 'http://127.0.0.1:30700'));
 const WORKFLOW_PUBLIC = env('WORKFLOW_URL', 'http://127.0.0.1:30700');

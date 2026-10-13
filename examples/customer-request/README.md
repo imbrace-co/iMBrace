@@ -28,7 +28,7 @@ You do not write code. The Community Edition stack installs the example by itsel
 
 ## Prerequisites
 
-1. **iMBrace Community Edition running** from `deploy/docker-compose.yml` (`cd deploy && sh generate-env.sh && docker compose up -d`; `generate-env.sh` writes the per-install Workflow keys into `deploy/.env` once). The default `PUBLIC_HOST=localhost` works.
+1. **iMBrace Community Edition running** from `deploy/docker-compose.yml` (`cd deploy && sh generate-env.sh && docker compose up -d`; `generate-env.sh` writes the per-install Workflow keys and the dashboard admin password into `deploy/.env` once and prints the login). The default `PUBLIC_HOST=localhost` works.
 
    On first start the stack installs this example (service `examples-seed`): the stub endpoints on `http://127.0.0.1:30800` (service `customer-request-stub`), the API key connection `imbrace-api-key` and both flows, published and enabled. `SEED_EXAMPLES=false` in `deploy/.env` turns that off. The seed never overwrites a flow that already exists, so your edits in the flow builder survive `docker compose up -d`.
 
@@ -58,6 +58,7 @@ Step 11: FlowOps → Workflows → **Runs**, open the *Customer request - intake
 
 ```bash
 cd examples/customer-request
+export IMBRACE_PASSWORD=$(sed -n 's/^ADMIN_PASSWORD=//p' ../../deploy/.env)   # also for setup.mjs
 node scripts/cli.mjs request REQ-1001     # same commands: reply, approve, result, calls, urls
 ```
 
@@ -69,7 +70,7 @@ The bash scripts (`send-request.sh`, `send-reply.sh`, `approve.sh`, `acceptance-
 
 Without the seed (`SEED_EXAMPLES=false`), install it by hand: `docker compose up -d customer-request-stub` in `deploy`, then `node scripts/setup.mjs` here, which creates the AI agent (an LLM provider must exist) and the API key connection, imports + publishes both flows and writes `scripts/.state.json`.
 
-`setup.mjs` reads `IMBRACE_API` (default `http://127.0.0.1:6868/api`), `IMBRACE_EMAIL` / `IMBRACE_PASSWORD` (default: the Community Edition admin), `CLASSIFIER_PROVIDER_TYPE` (default `bedrock`) and `CLASSIFIER_MODEL` (default `qwen.qwen3-32b-v1:0`). Re-running it updates the flows in place (it overwrites edits made in the flow builder; `--seed` does not).
+`setup.mjs` reads `IMBRACE_API` (default `http://127.0.0.1:6868/api`), `IMBRACE_EMAIL` / `IMBRACE_PASSWORD` (default `admin@imbrace.co` / none — `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `deploy/.env`), `CLASSIFIER_PROVIDER_TYPE` (default `bedrock`) and `CLASSIFIER_MODEL` (default `qwen.qwen3-32b-v1:0`). Re-running it updates the flows in place (it overwrites edits made in the flow builder; `--seed` does not).
 
 ## Acceptance test
 
