@@ -26,6 +26,13 @@
 #                                 everyone out
 #   GARAGE_RPC_SECRET             Garage (S3) rpc_secret
 #
+# Datastore passwords (32 hex chars, openssl rand -hex 16):
+#   POSTGRES_PASSWORD  initdb only runs once — changing it after the first run
+#                      also needs an `ALTER ROLE` inside Postgres, or the
+#                      services using the old password can no longer connect.
+#   REDIS_PASSWORD     safe to rotate: Redis re-reads it from `--requirepass`
+#                      on restart.
+#
 # Upgrading an install that ran the earlier compose file (fixed values)? Put the
 # old values into .env BEFORE running this script, so existing data still works:
 #   ADMIN_PASSWORD=ChangeMe@12345
@@ -64,6 +71,8 @@ add_if_missing INTERNAL_SERVICE_KEY "$(rand_hex 32)"
 add_if_missing CHATAI_ENCRYPTION_SECRET_KEY "$(rand_hex 32)"
 add_if_missing CHATAI_WEBUI_SECRET_KEY "$(rand_hex 32)"
 add_if_missing GARAGE_RPC_SECRET "$(rand_hex 32)"
+add_if_missing POSTGRES_PASSWORD "$(rand_hex 16)"
+add_if_missing REDIS_PASSWORD "$(rand_hex 16)"
 
 echo
 echo "Dashboard login: $(sed -n 's/^ADMIN_EMAIL=//p' "$ENV_FILE") / $(sed -n 's/^ADMIN_PASSWORD=//p' "$ENV_FILE")"

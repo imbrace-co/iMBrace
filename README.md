@@ -46,20 +46,20 @@ The whole stack is one file: [`deploy/docker-compose.yml`](deploy/docker-compose
 21 containers plus 10 one-shot jobs (9 DB inits and the example seed), all from public
 `docker.io/imbraceco` images and official base images (`amd64` + `arm64`, no registry token).
 
-### ⚠️ Credentials — what is generated, what is still a fixed default
+### ⚠️ Credentials — what `generate-env.sh` writes
 
-`sh generate-env.sh` writes a random value per install into `.env` for every secret below
-except Postgres and Redis. `docker compose up` refuses to start until they are there.
+`sh generate-env.sh` writes a random value per install into `.env` for every secret below.
+`docker compose up` refuses to start until they are there.
 
-| Credential | Default | Where to change it |
-|---|---|---|
-| Dashboard admin login | `admin@imbrace.co` / random per install | `.env` → `ADMIN_EMAIL` / `ADMIN_PASSWORD` — **before the first start** (the admin is seeded once; if you later change the password in the UI, put the new one in `.env` too — the example seed logs in with it) |
-| Workflow keys | random per install | `.env` → `AP_ENCRYPTION_KEY` (encrypts stored connection credentials), `AP_JWT_SECRET` (signs Workflow tokens) |
-| chat-ai keys | random per install | `.env` → `CHATAI_ENCRYPTION_SECRET_KEY` (encrypts stored LLM provider configs), `CHATAI_WEBUI_SECRET_KEY` (signs sessions) |
-| ai-agent → chat-ai service key | random per install | `.env` → `INTERNAL_SERVICE_KEY` (lets ai-agent read unmasked LLM provider keys and call DocIQ) |
-| Garage S3 | random per install | `.env` → `GARAGE_RPC_SECRET` |
-| Postgres superuser + `imbrace` role | `changeme-postgres-pass` — **fixed** | `.env` → `POSTGRES_PASSWORD` — **before the first start** (afterwards it needs an `ALTER ROLE`) |
-| Redis | `imbrace-dev-redis-pass` — **fixed** | `.env` → `REDIS_PASSWORD` |
+| Credential                           | Default                                       | Where to change it                                                                                                                                                                                                               |
+| ------------------------------------ | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dashboard admin login                | `admin@imbrace.co` / random per install     | `.env` → `ADMIN_EMAIL` / `ADMIN_PASSWORD` — **before the first start** (the admin is seeded once; if you later change the password in the UI, put the new one in `.env` too — the example seed logs in with it) |
+| Workflow keys                        | random per install                            | `.env` → `AP_ENCRYPTION_KEY` (encrypts stored connection credentials), `AP_JWT_SECRET` (signs Workflow tokens)                                                                                                            |
+| chat-ai keys                         | random per install                            | `.env` → `CHATAI_ENCRYPTION_SECRET_KEY` (encrypts stored LLM provider configs), `CHATAI_WEBUI_SECRET_KEY` (signs sessions)                                                                                                |
+| ai-agent → chat-ai service key      | random per install                            | `.env` → `INTERNAL_SERVICE_KEY` (lets ai-agent read unmasked LLM provider keys and call DocIQ)                                                                                                                              |
+| Garage S3                            | random per install                            | `.env` → `GARAGE_RPC_SECRET`                                                                                                                                                                                                |
+| Postgres superuser +`imbrace` role | random per install | `.env` → `POSTGRES_PASSWORD` — **before the first start** (afterwards it needs an `ALTER ROLE`, since initdb only runs once) |
+| Redis                                | random per install                            | `.env` → `REDIS_PASSWORD` — safe to rotate, Redis re-reads it on restart                                                                                                                                             |
 
 Do not replace `AP_ENCRYPTION_KEY` or `CHATAI_ENCRYPTION_SECRET_KEY` on a running install:
 stored Workflow connections / LLM provider configs become undecryptable. The script never
@@ -72,12 +72,12 @@ overwrites a key that is already in `.env`, and prints the dashboard login at th
 Runs on **Linux** (`amd64` / `arm64`) and **macOS** (Apple Silicon or Intel) — every image
 is multi-arch, so Apple Silicon runs natively without emulation.
 
-| | Linux | macOS |
-|---|---|---|
-| Docker | Docker Engine 24+ with **Compose v2.23.1+** | Docker Desktop, OrbStack or Colima with **Compose v2.23.1+** |
-| Resources | Recommended **8 cores / 24 GB RAM / 100 GB SSD** | Same, but given to Docker's VM: **Settings → Resources**, at least 16–24 GB memory and a 100 GB disk image (the defaults are too small) |
-| Commands | Prefix `docker` with `sudo` unless your user is in the `docker` group | No `sudo` |
-| `PUBLIC_HOST` | The server's IP or domain | `localhost` for this Mac only, or its LAN IP (`ipconfig getifaddr en0`) for other machines — then allow Docker in the macOS firewall |
+|                 | Linux                                                                      | macOS                                                                                                                                          |
+| --------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker          | Docker Engine 24+ with**Compose v2.23.1+**                           | Docker Desktop, OrbStack or Colima with**Compose v2.23.1+**                                                                              |
+| Resources       | Recommended**8 cores / 24 GB RAM / 100 GB SSD**                      | Same, but given to Docker's VM:**Settings → Resources**, at least 16–24 GB memory and a 100 GB disk image (the defaults are too small) |
+| Commands        | Prefix`docker` with `sudo` unless your user is in the `docker` group | No`sudo`                                                                                                                                     |
+| `PUBLIC_HOST` | The server's IP or domain                                                  | `localhost` for this Mac only, or its LAN IP (`ipconfig getifaddr en0`) for other machines — then allow Docker in the macOS firewall      |
 
 - The stack idles at ~7.5 GB RAM; too little RAM shows up as OOM-kills or a frozen host,
   not as a clear error.
@@ -95,14 +95,10 @@ mkdir imbrace && cd imbrace
 curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/docker-compose.yml
 curl -fsSLO https://raw.githubusercontent.com/imbrace-co/iMBrace/main/deploy/generate-env.sh
 
-# First install only: random database passwords. The [ -f .env ] guard keeps an existing
-# .env, because a new POSTGRES_PASSWORD no longer matches the initialized database.
-[ -f .env ] || cat > .env <<EOF
-POSTGRES_PASSWORD=$(openssl rand -hex 16)
-REDIS_PASSWORD=$(openssl rand -hex 16)
-EOF
-sh generate-env.sh              # adds the random per-install keys + ADMIN_PASSWORD to .env and prints
-                                # the dashboard login (ADMIN_EMAIL=you@x sh ... for another email)
+sh generate-env.sh              # writes a random value per install into .env for every
+                                # secret, including POSTGRES_PASSWORD / REDIS_PASSWORD, and
+                                # prints the dashboard login (ADMIN_EMAIL=you@x sh ... for
+                                # another email). Existing values in .env are never touched.
 
 docker compose pull
 docker compose up -d            # first start takes ~5 min
@@ -147,13 +143,13 @@ curl -s -X POST -H 'Content-Type: application/json' \
   http://<PUBLIC_HOST>:6868/api/platform/v1/login/authenticate     # returns a token
 ```
 
-| URL | Content |
-|---|---|
-| `http://<PUBLIC_HOST>:6868` | Dashboard + `/api` gateway |
-| `http://<PUBLIC_HOST>:30700` | Workflow automation |
+| URL                            | Content                     |
+| ------------------------------ | --------------------------- |
+| `http://<PUBLIC_HOST>:6868`  | Dashboard +`/api` gateway |
+| `http://<PUBLIC_HOST>:30700` | Workflow automation         |
 | `http://<PUBLIC_HOST>:30040` | AI agent (Next Best Action) |
-| `http://<PUBLIC_HOST>:30030` | insightIQ AI chat |
-| `http://<PUBLIC_HOST>:30050` | Embeddable chat widget |
+| `http://<PUBLIC_HOST>:30030` | insightIQ AI chat           |
+| `http://<PUBLIC_HOST>:30050` | Embeddable chat widget      |
 
 ### Try the example: two workflows that work together
 
@@ -162,10 +158,10 @@ The first `up -d` also installs the **customer-request** example
 service imports and enables two flows, and `customer-request-stub` (on `127.0.0.1:30800`)
 stands in for the customer and the business system.
 
-| Flow (FlowOps → Workflows) | Started by | What it does |
-|---|---|---|
-| **Customer request - intake** | a service request with a `request_id` | An AI agent classifies it, a code step finds the missing fields, the customer is asked for them, then the run **waits** (*Wait for Event*, key = `request_id`). After the reply it creates an approval task on the **Todos** page and, once approved, calls the business system. |
-| **Customer request - reply router** | the customer's reply with the same `request_id` | *Resume Waiting Run*, key = `request_id`: hands the reply to the intake run waiting on that id, which carries on, and answers `202 resumed` — or `404 no waiting request` when no run waits on it. |
+| Flow (FlowOps → Workflows)               | Started by                                       | What it does                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Customer request - intake**       | a service request with a`request_id`           | An AI agent classifies it, a code step finds the missing fields, the customer is asked for them, then the run**waits** (*Wait for Event*, key = `request_id`). After the reply it creates an approval task on the **Todos** page and, once approved, calls the business system. |
+| **Customer request - reply router** | the customer's reply with the same`request_id` | *Resume Waiting Run*, key = `request_id`: hands the reply to the intake run waiting on that id, which carries on, and answers `202 resumed` — or `404 no waiting request` when no run waits on it.                                                                                     |
 
 The `request_id` is the only link between the two flows. The waiting run is stored in
 Postgres (no polling), so it survives `docker compose restart`, and a second reply for the
@@ -208,21 +204,21 @@ acceptance test, editing the flows): [`examples/customer-request/README.md`](exa
 
 ### Configuration (`.env`)
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `PUBLIC_HOST` | `localhost` | Browser-facing IP/domain. Unset: use `localhost` or `127.0.0.1` on the same machine (`127.0.0.1` for the widget full page needs `PUBLIC_HOST=127.0.0.1`) — **required** for any other machine |
-| `PUBLIC_SCHEME` / `WS_SCHEME` | `http` / `ws` | Set `https` / `wss` behind a TLS proxy |
-| `AP_ENCRYPTION_KEY` / `AP_JWT_SECRET` | none — **required** | Workflow keys, written by `sh generate-env.sh` |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@imbrace.co` / none — **required** | Dashboard admin, seeded on the first start only; written by `sh generate-env.sh` |
-| `POSTGRES_PASSWORD` | `changeme-postgres-pass` | Postgres superuser and app role |
-| `REDIS_PASSWORD` | `imbrace-dev-redis-pass` | Redis auth |
-| `INTERNAL_SERVICE_KEY` | none — **required** | Shared by ai-agent and chat-ai (also DocIQ's API key); other callers only see masked LLM provider keys. Written by `sh generate-env.sh` |
-| `CHATAI_ENCRYPTION_SECRET_KEY` / `CHATAI_WEBUI_SECRET_KEY` | none — **required** | chat-ai provider-config encryption / session signing; written by `sh generate-env.sh` |
-| `GARAGE_RPC_SECRET` | none — **required** | Garage `rpc_secret` (64 hex chars); written by `sh generate-env.sh` |
-| `SEED_EXAMPLES` | `true` | `false` skips installing the example workflows |
-| `CLASSIFIER_PROVIDER_TYPE` / `CLASSIFIER_MODEL` | `bedrock` / `qwen.qwen3-32b-v1:0` | LLM provider type and model of the example's AI agent |
-| `GARAGE_KEY_ID` / `GARAGE_KEY_SECRET` | empty | Garage S3 keys (optional bootstrap in the compose header) |
-| `OPENAI_API_KEY` / `TAVILY_API_KEY` | empty | Optional external providers |
+| Variable                                                       | Default                                           | Purpose                                                                                                                                                                                                     |
+| -------------------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PUBLIC_HOST`                                                | `localhost`                                     | Browser-facing IP/domain. Unset: use`localhost` or `127.0.0.1` on the same machine (`127.0.0.1` for the widget full page needs `PUBLIC_HOST=127.0.0.1`) — **required** for any other machine |
+| `PUBLIC_SCHEME` / `WS_SCHEME`                              | `http` / `ws`                                 | Set`https` / `wss` behind a TLS proxy                                                                                                                                                                   |
+| `AP_ENCRYPTION_KEY` / `AP_JWT_SECRET`                      | none —**required**                         | Workflow keys, written by`sh generate-env.sh`                                                                                                                                                             |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD`                           | `admin@imbrace.co` / none — **required** | Dashboard admin, seeded on the first start only; written by`sh generate-env.sh`                                                                                                                           |
+| `POSTGRES_PASSWORD`                                          | random per install, written by`sh generate-env.sh`                        | Postgres superuser and app role — changing it after the first start also needs an `ALTER ROLE`                                                                                                             |
+| `REDIS_PASSWORD`                                             | random per install, written by`sh generate-env.sh`                        | Redis auth                                                                                                                                                                                                  |
+| `INTERNAL_SERVICE_KEY`                                       | none —**required**                         | Shared by ai-agent and chat-ai (also DocIQ's API key); other callers only see masked LLM provider keys. Written by`sh generate-env.sh`                                                                    |
+| `CHATAI_ENCRYPTION_SECRET_KEY` / `CHATAI_WEBUI_SECRET_KEY` | none —**required**                         | chat-ai provider-config encryption / session signing; written by`sh generate-env.sh`                                                                                                                      |
+| `GARAGE_RPC_SECRET`                                          | none —**required**                         | Garage`rpc_secret` (64 hex chars); written by `sh generate-env.sh`                                                                                                                                      |
+| `SEED_EXAMPLES`                                              | `true`                                          | `false` skips installing the example workflows                                                                                                                                                            |
+| `CLASSIFIER_PROVIDER_TYPE` / `CLASSIFIER_MODEL`            | `bedrock` / `qwen.qwen3-32b-v1:0`             | LLM provider type and model of the example's AI agent                                                                                                                                                       |
+| `GARAGE_KEY_ID` / `GARAGE_KEY_SECRET`                      | empty                                             | Garage S3 keys (optional bootstrap in the compose header)                                                                                                                                                   |
+| `OPENAI_API_KEY` / `TAVILY_API_KEY`                        | empty                                             | Optional external providers                                                                                                                                                                                 |
 
 ### Operate
 
@@ -249,27 +245,29 @@ BSD-3-Clause) — check the `LICENSE` file in each repo.
 ## Repositories
 
 ### Frontend
-| Repo | Description | Stack |
-|---|---|---|
-| [imbrace-fe](https://github.com/imbrace-co/imbrace-fe) | Main webapp — admin / member workspace | Vite · React 18 · Redux Toolkit · PWA |
-| [imbrace-chat-widget](https://github.com/imbrace-co/imbrace-chat-widget) | Embeddable chat widget (`<script>` drop-in) | Vite · React |
 
+| Repo                                                                    | Description                                   | Stack                                    |
+| ----------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------- |
+| [imbrace-fe](https://github.com/imbrace-co/imbrace-fe)                   | Main webapp — admin / member workspace       | Vite · React 18 · Redux Toolkit · PWA |
+| [imbrace-chat-widget](https://github.com/imbrace-co/imbrace-chat-widget) | Embeddable chat widget (`<script>` drop-in) | Vite · React                            |
 
 ### Backend services
-| Repo | Description | Stack |
-|---|---|---|
-| [platform](https://github.com/imbrace-co/platform) | Core platform — authentication, organizations, users, teams, SSO, licensing | Hono · Drizzle · PostgreSQL |
-| [app-gateway](https://github.com/imbrace-co/app-gateway) | Self-hostable API gateway — auth, license verification, routing | Node · Express · TypeScript |
-| [ai-agent](https://github.com/imbrace-co/ai-agent) | AI agent runtime (backend + web client) — tools, MCP, chat orchestration | Express · React · TypeScript |
-| [chat-ai](https://github.com/imbrace-co/chat-ai) | AI chat service — runs OpenAPI/MCP tool-servers | Open WebUI-based |
-| [channel](https://github.com/imbrace-co/channel) | Omnichannel service — channels, conversations, contacts, webhooks, WebSocket | Hono · TypeScript |
-| [data_board](https://github.com/imbrace-co/data_board) | Data-board management — data / CRM / knowledge / document boards | Hono · Drizzle · PostgreSQL |
-| [file](https://github.com/imbrace-co/file) | File service — upload, storage, presigned URLs | Hono · TypeScript |
-| [marketplace](https://github.com/imbrace-co/marketplace) | Apps / templates / integrations hub | Node · TypeScript |
+
+| Repo                                                    | Description                                                                   | Stack                          |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------ |
+| [platform](https://github.com/imbrace-co/platform)       | Core platform — authentication, organizations, users, teams, SSO, licensing  | Hono · Drizzle · PostgreSQL  |
+| [app-gateway](https://github.com/imbrace-co/app-gateway) | Self-hostable API gateway — auth, license verification, routing              | Node · Express · TypeScript  |
+| [ai-agent](https://github.com/imbrace-co/ai-agent)       | AI agent runtime (backend + web client) — tools, MCP, chat orchestration     | Express · React · TypeScript |
+| [chat-ai](https://github.com/imbrace-co/chat-ai)         | AI chat service — runs OpenAPI/MCP tool-servers                              | Open WebUI-based               |
+| [channel](https://github.com/imbrace-co/channel)         | Omnichannel service — channels, conversations, contacts, webhooks, WebSocket | Hono · TypeScript             |
+| [data_board](https://github.com/imbrace-co/data_board)   | Data-board management — data / CRM / knowledge / document boards             | Hono · Drizzle · PostgreSQL  |
+| [file](https://github.com/imbrace-co/file)               | File service — upload, storage, presigned URLs                               | Hono · TypeScript             |
+| [marketplace](https://github.com/imbrace-co/marketplace) | Apps / templates / integrations hub                                           | Node · TypeScript             |
 
 ### Workflow
-| Repo | Description | Stack |
-|---|---|---|
+
+| Repo                                              | Description                | Stack               |
+| ------------------------------------------------- | -------------------------- | ------------------- |
 | [workflow](https://github.com/imbrace-co/workflow) | Workflow automation engine | TypeScript · React |
 
 ---
@@ -295,8 +293,7 @@ services:
 
 We welcome contributions. Please read:
 
-- [CONTRIBUTING.md](CONTRIBUTING.md) — how to set up, branch, and open a PR, and the
-  **license boundary** you must respect.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to set up, branch, and open a PR.
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — the standards we hold each other to.
 
 ## Security

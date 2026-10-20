@@ -19,7 +19,8 @@
 # QUICK START
 # -----------------------------------------------------------------------------
 #   cd deploy
-#   sh generate-env.sh         # once: writes random AP_* keys, admin password and service secrets into .env
+#   sh generate-env.sh         # once: writes random AP_* keys, admin password, service
+#                              # secrets and database passwords into .env
 #   docker compose up -d
 #   docker compose ps
 #
@@ -97,9 +98,12 @@
 # -----------------------------------------------------------------------------
 # BEFORE PRODUCTION
 # -----------------------------------------------------------------------------
-# - Rotate: POSTGRES_PASSWORD, REDIS_PASSWORD. The AP_* keys, ADMIN_PASSWORD,
-#   INTERNAL_SERVICE_KEY, CHATAI_* keys and GARAGE_RPC_SECRET have no default —
-#   `up` refuses to start without them; sh generate-env.sh creates them per install.
+# - sh generate-env.sh creates a random POSTGRES_PASSWORD and REDIS_PASSWORD per
+#   install (along with the AP_* keys, ADMIN_PASSWORD, INTERNAL_SERVICE_KEY,
+#   CHATAI_* keys and GARAGE_RPC_SECRET, none of which have a default — `up`
+#   refuses to start without them). If .env was created before generate-env.sh
+#   covered them, it still falls back to changeme-postgres-pass /
+#   imbrace-dev-redis-pass — put real values in .env and rotate.
 #   Changing POSTGRES_PASSWORD after the first run also needs
 #   an `ALTER ROLE` inside Postgres — initdb only runs once.
 # - SMTP (mailgun) ships with an empty password; fill SMTP_PASSWORD /
